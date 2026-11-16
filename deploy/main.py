@@ -17,6 +17,7 @@ from operations import (
     runtime_action,
     start,
     stop,
+    trigger_sync,
     unit_name,
     update_sources,
 )
@@ -24,6 +25,10 @@ from storage import Store, lock, read
 
 
 def perform(store, action):
+    if action == "sync":
+        # The foreground supervisor holds the operation lock for its lifetime.
+        trigger_sync(store)
+        return
     d = store.doc["deployment"]
     with lock(store.var / "operation.lock"):
         if action == "pull":
@@ -99,6 +104,7 @@ def main():
             "stop",
             "logs",
             "check",
+            "sync",
             "init-db",
             "migrate",
         ),
@@ -128,7 +134,7 @@ def main():
     if args.action != "configure":
         if not store.path.exists():
             raise ValueError("请先运行 ./setup.sh 完成配置并保存。")
-        if args.action not in {"logs", "stop", "pull"}:
+        if args.action not in {"logs", "stop", "pull", "sync"}:
             form = configure(store, mode)
             errors = form.errors()
             if errors:
@@ -148,11 +154,14 @@ def main():
         22: "init-deploy",
         30: "init-db",
         31: "migrate",
+        32: "sync",
         40: "pull",
     }
     notice = ""
+    form = None
     while True:
-        form = configure(store, mode)
+        if form is None:
+            form = configure(store, mode)
         if notice:
             form.notice = notice
             notice = ""
@@ -161,17 +170,25 @@ def main():
             store = Store()
             mode = None
             notice = "原配置导入成功；请核对数据目录、发布 URL 和凭据，再保存或部署。"
+            form = None
             continue
         if result not in actions:
             return
-        print(f"\nEverunfold · {actions[result]} · {store.path}", flush=True)
+        action = actions[result]
+        print(f"\nEverunfold · {action} · {store.path}", flush=True)
         try:
-            perform(store, actions[result])
+            target = Store(store.path) if action == "sync" else store
+            if action == "sync":
+                defaults(target, mode)
+            perform(target, action)
         except (OSError, ValueError) as error:
             print(f"\033[31m操作未完成：{error}\033[0m", file=sys.stderr)
         input("\n按回车返回配置向导…")
+        if action == "sync":
+            continue
         store = Store()
         mode = None
+        form = None
 
 
 if __name__ == "__main__":

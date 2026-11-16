@@ -168,6 +168,39 @@ def test_stop_removes_only_the_verified_container_id(configured, monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("owner", [True, False])
+def test_sync_uses_the_running_container_owned_by_this_deployment(configured, monkeypatch, owner):
+    store = configured("docker")
+    container_id = "d" * 64
+    payload = [
+        {
+            "Id": container_id,
+            "Config": {
+                "Labels": {
+                    "org.everunfold.deployment": str(store.path) if owner else "/other/config.yaml"
+                },
+            },
+            "State": {"Running": True},
+        }
+    ]
+    monkeypatch.setattr(
+        operations.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, json.dumps(payload), ""),
+    )
+    calls = []
+    monkeypatch.setattr(operations, "execute", lambda args: calls.append(args))
+    if owner:
+        operations.trigger_sync(store)
+        assert calls == [
+            ["docker", "exec", container_id, "python", "/opt/everunfold/deploy/runtime.py", "sync"],
+        ]
+    else:
+        with pytest.raises(ValueError, match="不属于"):
+            operations.trigger_sync(store)
+        assert not calls
+
+
 def test_start_resumes_existing_build_without_git_or_npm(configured, monkeypatch):
     import main
 

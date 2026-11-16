@@ -84,6 +84,12 @@ def register_backend_plugins(layout):
     run_backend(layout, ["-m", "tools.register_backend_plugins", "--apply"])
 
 
+def trigger_sync(layout):
+    if not (Path(layout["backend_root"]) / "tools/trigger_frontend_sync.py").is_file():
+        raise ValueError("当前后端版本缺少触发同步命令，请先更新并部署新版后端。")
+    run_backend(layout, ["-m", "tools.trigger_frontend_sync"])
+
+
 def commands(layout):
     env = environment(layout, "backend")
     python = layout["python"]
@@ -227,7 +233,8 @@ def supervise(layout):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "action", choices=("serve", "prepare", "prepare-init", "init", "check", "health", "migrate")
+        "action",
+        choices=("serve", "prepare", "prepare-init", "init", "check", "health", "migrate", "sync"),
     )
     parser.add_argument(
         "--layout", default=os.environ.get("EVERUNFOLD_RUNTIME", "/config/runtime.yaml")
@@ -246,6 +253,8 @@ def main():
         run_backend(layout, ["deploy/runtime_check.py"])
     elif args.action == "health":
         health(layout)
+    elif args.action == "sync":
+        trigger_sync(layout)
     else:
         run_backend(layout, ["-m", "alembic", "-c", "migrations/alembic.ini", "upgrade", "head"])
         register_backend_plugins(layout)

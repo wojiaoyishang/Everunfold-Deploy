@@ -60,6 +60,7 @@ docker restart everunfold       # 仅重启现有进程，不编译、不做 DDL
 ./setup.sh --docker build       # 只构建，保留正在运行的版本
 ./setup.sh --docker migrate     # 先备份数据库；停止本实例后显式执行迁移
 ./setup.sh --docker start       # 启动最后成功构建的版本
+./setup.sh --docker sync        # 使用运行容器触发已配对节点的同步
 ./setup.sh --docker stop        # 停止并删除本实例容器，保留数据与产物
 ./setup.sh logs
 ```
@@ -67,6 +68,7 @@ docker restart everunfold       # 仅重启现有进程，不编译、不做 DDL
 升级流程：先 `build`；若版本需要迁移，备份数据库后 `migrate`；再 `start`。
 “初始化数据库并构建启动”只初始化确认空的数据库；已有非空库不会被清空。
 迁移失败或启动准备失败不会自动回滚数据库，日志会指出下一步。
+“触发同步”使用当前运行容器的后端配置和版本。更新部署程序和后端后首次使用时，需先构建并启动支持此操作的版本。
 
 每次 build 会分别构建宿主和插件，将插件写入候选目录，全部成功才发布；内容哈希文件增量复制、manifest 最后原子替换。
 已有独立插件目录不会被自动删除；移除插件时先停用对应功能，再处理它的数据目录。

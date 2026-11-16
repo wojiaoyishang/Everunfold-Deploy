@@ -38,6 +38,7 @@ sudo loginctl enable-linger 部署用户名
 ```bash
 ./setup.sh --native build
 ./setup.sh --native start
+./setup.sh --native sync
 ./setup.sh logs
 ./setup.sh stop
 ```
@@ -50,6 +51,7 @@ sudo loginctl enable-linger 部署用户名
 ```
 
 `run` 检查依赖、配对并同步后端插件清单后，启动 API、Worker、Scheduler 和 Node。Ctrl+C / SIGTERM 统一停止。
+可在另一终端运行 `./setup.sh --native sync` 触发同步，后端会用当前运行配置为已配对节点重新排队。
 任一进程意外退出时，其余进程也停止，避免只剩前端或重复 Scheduler 的半运行状态。
 不使用 nohup 隐藏启动错误；需要后台常驻时使用上面的 systemd 用户服务。
 

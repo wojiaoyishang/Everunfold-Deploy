@@ -32,6 +32,7 @@ ACTIONS = {
     "init-deploy": 22,
     "init-db": 30,
     "migrate": 31,
+    "sync": 32,
     "pull": 40,
 }
 
@@ -293,6 +294,7 @@ class SetupApp(App[int]):
             with Horizontal(classes="buttons"):
                 yield Button("查看 / 复制选中项", id="copy_value")
                 yield Button("查看 / 复制结果", id="copy_results")
+                yield Button("触发同步", id="sync")
             if self.config.backend:
                 with Horizontal(classes="buttons"):
                     yield Button("初始化数据库并构建启动", id="init-deploy", variant="success")
@@ -451,6 +453,9 @@ class SetupApp(App[int]):
     @work(group="finish")
     async def finish(self, action: str) -> None:
         if self.exporting or len(self.screen_stack) > 1:
+            return
+        if action == "sync":
+            self.exit(ACTIONS[action])
             return
         if action == "import-existing":
             if not await self.push_screen_wait(

@@ -454,22 +454,46 @@ def inspect_container(name):
     return existing
 
 
+def deployment_container(store):
+    existing = inspect_container(store.doc["deployment"]["container"])
+    if existing is not None and (existing["Config"].get("Labels") or {}).get(
+        "org.everunfold.deployment"
+    ) != str(store.path):
+        raise ValueError("同名容器不属于此部署，请修改容器名称。")
+    return existing
+
+
 def stop(store):
-    d = store.doc["deployment"]
-    if d["mode"] == "native":
+    if store.doc["deployment"]["mode"] == "native":
         execute(["systemctl", "--user", "stop", unit_name(store)])
-    else:
-        existing = inspect_container(d["container"])
-        if existing is None:
-            return
-        if (existing["Config"].get("Labels") or {}).get("org.everunfold.deployment") != str(
-            store.path
-        ):
-            raise ValueError("同名容器不属于此部署，请修改容器名称。")
+    elif (existing := deployment_container(store)) is not None:
         # Operate on the verified ID so a replacement using the same name cannot
         # bypass the ownership check between inspect and stop/remove.
         execute(["docker", "stop", "--time", "40", existing["Id"]])
         execute(["docker", "rm", existing["Id"]])
+
+
+def trigger_sync(store):
+    if store.doc["deployment"]["mode"] == "docker":
+        container = deployment_container(store)
+        state = container.get("State") if container else None
+        if container is None or not isinstance(state, dict) or state.get("Running") is not True:
+            raise ValueError("请先启动此部署的容器，再触发同步。")
+        execute(
+            [
+                "docker",
+                "exec",
+                container["Id"],
+                "python",
+                "/opt/everunfold/deploy/runtime.py",
+                "sync",
+            ]
+        )
+        return
+    layout = store.runtime / "runtime.yaml"
+    if not layout.is_file():
+        raise ValueError("请先构建并启动此部署，生成运行配置。")
+    execute([sys.executable, ROOT / "deploy/runtime.py", "sync", "--layout", layout])
 
 
 def publish_plugins(source, target):

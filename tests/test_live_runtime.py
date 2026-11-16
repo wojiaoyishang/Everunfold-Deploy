@@ -16,7 +16,7 @@ import asyncpg
 import pytest
 from configure import configure
 from operations import layout_for, publish_plugins, runtime_action
-from storage import ROOT, Store, read
+from storage import ROOT, Store, lock, read
 
 
 def port():
@@ -43,6 +43,46 @@ async def simulate_previous_glossary_build(pg_port):
             await connection.execute(
                 "UPDATE site_settings SET data = $1 WHERE id = 1", json.dumps(data)
             )
+    finally:
+        await connection.close()
+
+
+async def exhaust_content_delivery(pg_port):
+    connection = await asyncpg.connect(
+        host="127.0.0.1", port=pg_port, user="test", database="postgres"
+    )
+    try:
+        return await connection.fetchval(
+            """
+            UPDATE settings_delivery_events
+            SET attempts = 10000, applied_at = NULL, error = 'fixture_retries_exhausted'
+            WHERE node_id = 'web-main'
+              AND resource = 'public-content'
+              AND (source_epoch, revision) = (
+                SELECT source_epoch, content_generation FROM site_settings WHERE id = 1
+              )
+            RETURNING id
+            """
+        )
+    finally:
+        await connection.close()
+
+
+async def wait_for_retried_delivery(pg_port, event):
+    connection = await asyncpg.connect(
+        host="127.0.0.1", port=pg_port, user="test", database="postgres"
+    )
+    try:
+        for _ in range(100):
+            row = await connection.fetchrow(
+                "SELECT attempts, applied_at, error FROM settings_delivery_events WHERE id = $1",
+                event,
+            )
+            if row["applied_at"] is not None:
+                assert row["attempts"] < 10000 and row["error"] is None
+                return
+            await asyncio.sleep(0.2)
+        pytest.fail("manually triggered content delivery did not finish")
     finally:
         await connection.close()
 
@@ -206,6 +246,18 @@ def test_real_initialize_pair_sync_restart(tmp_path):
                 # must fail before it can take the old plugin routes offline.
                 with pytest.raises(ValueError, match="退出码"):
                     runtime_action(store, release, "prepare")
+                event = asyncio.run(exhaust_content_delivery(pg_port))
+                assert event is not None, "first startup did not enqueue the current public content"
+                # The foreground setup command would still hold this lock.
+                with lock(store.var / "operation.lock"):
+                    subprocess.run(
+                        [sys.executable, ROOT / "deploy/main.py", "--native", "sync"],
+                        env={**environment, "CONFIG_FILE": str(store.path)},
+                        check=True,
+                    )
+                with urlopen(glossary_url, timeout=3) as response:
+                    assert json.load(response)["code"] == 200
+                asyncio.run(wait_for_retried_delivery(pg_port, event))
             supervisor.send_signal(signal.SIGTERM)
             assert supervisor.wait(timeout=45) == 0
             assert (

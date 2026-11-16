@@ -1,0 +1,7 @@
+*
+!pyproject.toml
+!uv.lock
+!deploy/
+!deploy/*.py
+!docker/
+!docker/setup.Dockerfile

@@ -1,5 +1,6 @@
 """Opt-in real PostgreSQL/Redis + already-built Next.js integration (no live user services)."""
 
+import asyncio
 import json
 import os
 import signal
@@ -8,8 +9,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
+import asyncpg
 import pytest
 from configure import configure
 from operations import layout_for, publish_plugins, runtime_action
@@ -20,6 +23,28 @@ def port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+async def simulate_previous_glossary_build(pg_port):
+    connection = await asyncpg.connect(
+        host="127.0.0.1", port=pg_port, user="test", database="postgres"
+    )
+    try:
+        async with connection.transaction():
+            data = json.loads(
+                await connection.fetchval("SELECT data FROM site_settings WHERE id = 1 FOR UPDATE")
+            )
+            glossary = next(
+                item["info"]
+                for item in data["_backend_plugins"]
+                if item["info"]["id"] == "everunfold.glossary"
+            )
+            glossary["build"] = "0" * 64
+            await connection.execute(
+                "UPDATE site_settings SET data = $1 WHERE id = 1", json.dumps(data)
+            )
+    finally:
+        await connection.close()
 
 
 def test_real_initialize_pair_sync_restart(tmp_path):
@@ -132,7 +157,7 @@ def test_real_initialize_pair_sync_restart(tmp_path):
             Path(store.doc["deployment"][role + "_data"]).mkdir()
         store.render()
         layout_for(store, release)
-        runtime_action(store, release, "init")
+        runtime_action(store, release, "prepare-init")
         store.import_runtime()
         store.save()
         assert store.doc["frontend"]["application"]["settings"]["source_epoch"]
@@ -167,12 +192,29 @@ def test_real_initialize_pair_sync_restart(tmp_path):
                 )
             with urlopen(f"http://127.0.0.1:{api_port}/", timeout=3) as response:
                 assert "夕阳" in json.load(response)["msg"]
+            glossary_url = f"http://127.0.0.1:{api_port}/v1/plugins/everunfold.glossary/index"
+            with urlopen(glossary_url, timeout=3) as response:
+                assert json.load(response)["code"] == 200
+            if attempt == 0:
+                asyncio.run(simulate_previous_glossary_build(pg_port))
+                with pytest.raises(HTTPError) as failure:
+                    urlopen(glossary_url, timeout=3)
+                with failure.value as response:
+                    assert response.code == 503
+                    assert json.load(response)["code"] == 50389
+                # Preparing a different catalog while an API still owns the data directory
+                # must fail before it can take the old plugin routes offline.
+                with pytest.raises(ValueError, match="退出码"):
+                    runtime_action(store, release, "prepare")
             supervisor.send_signal(signal.SIGTERM)
             assert supervisor.wait(timeout=45) == 0
             assert (
                 "inventory_token_missing"
                 not in (tmp_path / ("runtime" + str(attempt) + ".log")).read_text()
             )
+            if attempt == 0:
+                # A normal start against a current schema repairs the drift without migrating.
+                runtime_action(store, release, "prepare")
         # Explicit initialization is idempotent, preserving existing records.
         runtime_action(store, release, "init")
     finally:

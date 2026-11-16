@@ -5,7 +5,7 @@
 
 ## 构建与运行
 
-“构建并启动”依次完成源码更新、后端代码快照、统一运行镜像构建、前端宿主与插件编译、数据库检查、自动配对和容器启动。
+“构建并启动”依次完成源码更新、后端代码快照、统一运行镜像构建、前端宿主与插件编译、数据库检查、自动配对、后端插件清单同步和容器启动。
 只有构建成功后才会停止并替换本部署拥有的旧容器。无关的同名容器会触发错误，不会被删除。
 
 镜像名为 `everunfold:<版本号>`，含 Everunfold 标识和两端源码 commit 标签。
@@ -84,6 +84,16 @@ API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 ./setup.sh --docker start
 ## 排错
 
 - 若旧版脚本在构建成功后出现 `KeyError: 'Config'`，原因可能是通用 `docker inspect` 匹配到了同名网络或卷。新版已限定为容器查询；更新部署脚本后直接执行 `./setup.sh --docker start`，复用 `var/built.yaml` 指向的成功产物，无需重新构建。
+- 若后端插件返回 HTTP 503 / 业务码 `50389`「插件部署尚未同步」，用**当前运行的容器**登记现有清单，完成后无需重启。在宿主机执行（替换非默认容器名）：
+
+  ```bash
+  docker exec -e EVERUNFOLD_DATA_DIR=/data/backend -w /workspace/backend everunfold \
+    /opt/backend/venv/bin/python -m tools.register_backend_plugins \
+    --config /config/backend/config.yaml --apply
+  ```
+
+  这会同步插件清单并排队投递设置，无需迁移、重新导入数据或重编译。验证术语时重新打开加密文章并解锁。之后用更新的部署脚本构建并启动，新镜像会自动完成同步。
+
 - 检测只读地验证数据库/Redis，不测试发布域名；Docker 检测在选定网络中执行。
 - 启动后会等待两端 `/health/ready`，最多 120 秒。超时会明确显示“服务已启动但未就绪”，可查看 `./setup.sh logs`，不会假报成功。
 - 如果 Git 拒绝更新，进入提示的源码目录自行处理；脚本不自动合并或丢弃改动。

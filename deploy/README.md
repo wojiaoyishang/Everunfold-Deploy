@@ -49,7 +49,7 @@ sudo loginctl enable-linger 部署用户名
 ./setup.sh --native run
 ```
 
-`run` 检查依赖、配对后启动 API、Worker、Scheduler 和 Node。Ctrl+C / SIGTERM 统一停止。
+`run` 检查依赖、配对并同步后端插件清单后，启动 API、Worker、Scheduler 和 Node。Ctrl+C / SIGTERM 统一停止。
 任一进程意外退出时，其余进程也停止，避免只剩前端或重复 Scheduler 的半运行状态。
 不使用 nohup 隐藏启动错误；需要后台常驻时使用上面的 systemd 用户服务。
 
@@ -74,5 +74,5 @@ uv run --locked ruff check deploy tests
 uv run --locked pytest -q
 ```
 
-真实运行验收为可选的 `tests/test_live_runtime.py`：使用临时 PostgreSQL、Redis 和已构建的前端产物，验证空库初始化、自动配对、两端 ready、重启和幂等初始化。
+真实运行验收为可选的 `tests/test_live_runtime.py`：使用临时 PostgreSQL、Redis 和已构建的前端产物，验证空库初始化、自动配对、两端 ready、旧插件指纹恢复和幂等初始化。
 仅测试显式提供的临时实例，不连接用户生产服务。所需环境变量见该文件和 [交接状态](../docs/handoff/STATUS.md)。

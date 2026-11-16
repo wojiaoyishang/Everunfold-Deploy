@@ -44,7 +44,7 @@ cd Everunfold-Deploy
 ```bash
 ./setup.sh --docker build       # 拉取并编译，不替换运行中的服务
 ./setup.sh --docker start       # 启动最后一次成功构建，不重新编译
-./setup.sh --docker deploy      # 拉取、构建、检查、配对、启动
+./setup.sh --docker deploy      # 拉取、构建、检查、配对、同步插件清单并启动
 ./setup.sh logs                 # 查看合并后的前后端日志
 ```
 
@@ -102,6 +102,7 @@ cd Everunfold-Deploy
 - 自动拉取开启时，空目录执行 `git clone`，已有仓库执行 **`git pull --ff-only`**。本地改动、非 Git 目录、origin 不匹配、分叉或其他 Git 错误均停止，提示用户自行处理。不会执行 push、reset 或 stash。
 - 自动拉取关闭时，使用所选目录的现有代码，包括本地修改。版本记录会标记仓库是否有未提交改动。
 - 每次成功构建生成独立版本，构建失败保留当前运行版本。启动前准备失败会保持停止状态并输出原因，旧产物仍保留。
+- 由向导或 `setup.sh start` 启动时，检查数据库和节点配对后同步后端插件清单。已有库无需为插件清单单独执行迁移；普通的容器或 systemd 重启不执行这一步。
 - 重启不拉取、不安装依赖、不编译。npm 下载缓存持久保存；完整构建仍用 `npm ci` 核验锁文件并输出详细日志。
 
 配置、备份和 `var/runtime` 含私有密钥，文件使用 `0600`，已被 Git 忽略。

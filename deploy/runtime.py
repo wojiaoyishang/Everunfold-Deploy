@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 
 from storage import read
@@ -78,6 +79,11 @@ def prepare(layout, initialize=False):
     run_backend(layout, [str(Path(__file__).with_name("pair.py")), layout["frontend_config"]])
 
 
+def register_backend_plugins(layout):
+    print("[plugins] 同步当前后端版本的插件清单……", flush=True)
+    run_backend(layout, ["-m", "tools.register_backend_plugins", "--apply"])
+
+
 def commands(layout):
     env = environment(layout, "backend")
     python = layout["python"]
@@ -141,15 +147,21 @@ def health(layout, frontend=True):
                 raise ValueError(role + " not ready")
 
 
-def serve(layout):
-    # Prevent duplicate native launches / schedulers for this deployment instance.
+@contextmanager
+def runtime_lock(layout):
+    # Preparing a different release must not change the catalog under a running API.
     lock_file = Path(layout["backend_data"]) / ".runtime.lock"
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     with lock_file.open("a") as handle:
         try:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise ValueError("此数据目录已有运行中的实例，拒绝启动第二个 Scheduler。") from None
+            raise ValueError("此数据目录已有实例运行或正在启动，请先停止该实例。") from None
+        yield
+
+
+def serve(layout):
+    with runtime_lock(layout):
         return supervise(layout)
 
 
@@ -215,15 +227,19 @@ def supervise(layout):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "action", choices=("serve", "prepare", "init", "check", "health", "migrate")
+        "action", choices=("serve", "prepare", "prepare-init", "init", "check", "health", "migrate")
     )
     parser.add_argument(
         "--layout", default=os.environ.get("EVERUNFOLD_RUNTIME", "/config/runtime.yaml")
     )
     args = parser.parse_args()
     layout = read(args.layout)
-    if args.action in {"prepare", "init"}:
-        prepare(layout, args.action == "init")
+    if args.action in {"prepare", "prepare-init"}:
+        with runtime_lock(layout):
+            prepare(layout, initialize=args.action == "prepare-init")
+            register_backend_plugins(layout)
+    elif args.action == "init":
+        prepare(layout, initialize=True)
     elif args.action == "serve":
         return serve(layout)
     elif args.action == "check":
@@ -232,7 +248,7 @@ def main():
         health(layout)
     else:
         run_backend(layout, ["-m", "alembic", "-c", "migrations/alembic.ini", "upgrade", "head"])
-        run_backend(layout, ["-m", "tools.register_backend_plugins", "--apply"])
+        register_backend_plugins(layout)
         run_backend(layout, ["deploy/runtime_check.py"])
     return 0
 

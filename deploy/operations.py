@@ -503,7 +503,7 @@ def start(store, release, *, initialize=False, foreground=False):
         stop(store)
     store.render()
     layout_for(store, release)
-    runtime_action(store, release, "init" if initialize else "prepare")
+    runtime_action(store, release, "prepare-init" if initialize else "prepare")
     store.import_runtime()
     store.save()
     publish_plugins(directory / "plugins", Path(d["frontend_data"]) / "plugins")

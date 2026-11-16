@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -141,7 +142,7 @@ def temporary(d, args, capture=False):
     try:
         output = execute(["docker", "start", "--attach", container], capture=capture)
         status = execute(
-            ["docker", "inspect", "--format", "{{.State.ExitCode}}", container],
+            ["docker", "container", "inspect", "--format", "{{.State.ExitCode}}", container],
             capture=True,
         )
         if status != "0":
@@ -414,23 +415,61 @@ def install_unit(store):
     execute(["systemctl", "--user", "enable", "--now", unit.name])
 
 
+def inspect_container(name):
+    """Look up only containers; other Docker objects may share the same name."""
+    result = subprocess.run(
+        ["docker", "container", "inspect", name], capture_output=True, text=True
+    )
+    if result.returncode:
+        detail = (result.stderr or "").strip()
+        missing = {
+            f"{prefix}No such {kind}: {name}"
+            for prefix in ("Error: ", "Error response from daemon: ")
+            for kind in ("container", "object")
+        }
+        if detail in missing:
+            return None
+        raise ValueError(
+            f"无法查询 Docker 容器 {name}（退出码 {result.returncode}），未停止或删除任何容器。"
+            f"请检查 Docker 服务、连接和权限。\n{detail or 'Docker 未返回错误详情。'}"
+        )
+    try:
+        objects = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        objects = None
+    valid = isinstance(objects, list) and len(objects) == 1 and isinstance(objects[0], dict)
+    existing = objects[0] if valid else {}
+    config = existing.get("Config")
+    container_id = existing.get("Id")
+    if (
+        not isinstance(config, dict)
+        or not isinstance(container_id, str)
+        or re.fullmatch(r"[a-f0-9]{64}", container_id) is None
+        or (config.get("Labels") is not None and not isinstance(config["Labels"], dict))
+    ):
+        raise ValueError(
+            f"Docker 返回的 {name} 容器详情格式无效，未停止或删除任何容器。"
+            "请检查 Docker 客户端与服务端兼容性。"
+        )
+    return existing
+
+
 def stop(store):
     d = store.doc["deployment"]
     if d["mode"] == "native":
         execute(["systemctl", "--user", "stop", unit_name(store)])
     else:
-        result = subprocess.run(
-            ["docker", "inspect", d["container"]], capture_output=True, text=True
-        )
-        if result.returncode:
+        existing = inspect_container(d["container"])
+        if existing is None:
             return
-        existing = json.loads(result.stdout)[0]
         if (existing["Config"].get("Labels") or {}).get("org.everunfold.deployment") != str(
             store.path
         ):
             raise ValueError("同名容器不属于此部署，请修改容器名称。")
-        execute(["docker", "stop", "--time", "40", d["container"]])
-        execute(["docker", "rm", d["container"]])
+        # Operate on the verified ID so a replacement using the same name cannot
+        # bypass the ownership check between inspect and stop/remove.
+        execute(["docker", "stop", "--time", "40", existing["Id"]])
+        execute(["docker", "rm", existing["Id"]])
 
 
 def publish_plugins(source, target):

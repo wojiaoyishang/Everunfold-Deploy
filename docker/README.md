@@ -83,6 +83,7 @@ API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 ./setup.sh --docker start
 
 ## 排错
 
+- 若旧版脚本在构建成功后出现 `KeyError: 'Config'`，原因可能是通用 `docker inspect` 匹配到了同名网络或卷。新版已限定为容器查询；更新部署脚本后直接执行 `./setup.sh --docker start`，复用 `var/built.yaml` 指向的成功产物，无需重新构建。
 - 检测只读地验证数据库/Redis，不测试发布域名；Docker 检测在选定网络中执行。
 - 启动后会等待两端 `/health/ready`，最多 120 秒。超时会明确显示“服务已启动但未就绪”，可查看 `./setup.sh logs`，不会假报成功。
 - 如果 Git 拒绝更新，进入提示的源码目录自行处理；脚本不自动合并或丢弃改动。

@@ -236,6 +236,18 @@ def test_old_frontend_release_rejects_multi_worker_before_stop(configured, monke
         operations.start(store, release)
 
 
+def test_old_container_image_rejects_celery_autoscale_before_stop(configured, monkeypatch):
+    store = configured("docker")
+    release = {"mode": "docker", "release": "old"}
+    artifact = store.var / "releases/old/frontend/.next/BUILD_ID"
+    artifact.parent.mkdir(parents=True)
+    artifact.touch()
+    store.doc["backend"]["environment"].update(WORKER_POOL="prefork", WORKER_AUTOSCALE="4,1")
+    monkeypatch.setattr(operations, "stop", lambda *_: pytest.fail("old container must stay up"))
+    with pytest.raises(ValueError, match="不支持 Celery 自动伸缩"):
+        operations.start(store, release)
+
+
 def test_supervisor_stops_all_children_on_unexpected_exit(tmp_path, monkeypatch):
     marker = tmp_path / "pid"
     monkeypatch.setattr(

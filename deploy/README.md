@@ -68,6 +68,7 @@ sudo loginctl enable-linger 部署用户名
 已有前端运行布局时，向导也可以单独「编译前端插件」和「热更新前端」。命令是 `./setup.sh --native build-plugins` 和 `./setup.sh --native hot-update-frontend`。源码放在前端源码目录的 `src/plugins/<目录名>/`。受信任的预编译包直接解压到前端数据目录的 `plugin-inbox/<目录名>/`，其中包含 `manifest.json`，即可热更新。所选前端源码仓库需要包含新版发布工具。
 
 `API_WORKERS`、`WORKER_POOL`、`WORKER_CONCURRENCY` 和日志等级可以在向导中编辑，保存到 `backend.environment`。
+Celery 的执行池与并发策略通过 ↑/↓ 和 Enter 选择。选 `prefork` 和「按任务量自动伸缩」后填写并发下限、上限，例如 1 到 4。对应 `backend.environment.WORKER_AUTOSCALE: "4,1"`（最大、最小）；留空保留固定并发。修改后执行 `./setup.sh --native start`。
 「前端 Node.js 运行 worker 数」保存到 `frontend.environment.FRONTEND_WORKERS`，默认 `"1"`，范围 1–32，与编译 worker 数分开。使用支持此选项的已编译前端时，保存后执行 `./setup.sh --native start` 即可应用。
 前台 `run` 也读取进程环境覆盖。systemd 服务请通过向导或该用户服务的 Environment 覆盖设置，不依赖交互 shell 导出的变量。
 

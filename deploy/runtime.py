@@ -12,11 +12,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from storage import read
+from worker_capacity import PROCESS_KEYS, capacity_arguments
 
 PROCESS_OVERRIDES = {
     "API_WORKERS",
-    "WORKER_POOL",
-    "WORKER_CONCURRENCY",
+    *PROCESS_KEYS,
     "API_LOG_LEVEL",
     "WORKER_LOG_LEVEL",
     "SCHEDULER_LOG_LEVEL",
@@ -125,10 +125,7 @@ def commands(layout):
                 "-A",
                 "app.entrypoints.worker:celery_app",
                 "worker",
-                "--pool",
-                env.get("WORKER_POOL", "solo"),
-                "--concurrency",
-                env.get("WORKER_CONCURRENCY", "1"),
+                *capacity_arguments(env),
                 "--loglevel",
                 env.get("WORKER_LOG_LEVEL", "WARNING"),
             ],

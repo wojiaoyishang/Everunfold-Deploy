@@ -126,6 +126,8 @@ API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 FRONTEND_WORKERS=2 ./setu
 两种构建操作共用向导中的「前端编译 worker 数」和「Node 编译内存 MiB」。编译容器分别从 `FRONTEND_BUILD_WORKERS` 与 `NODE_OPTIONS` 读取这两个设置。
 首次启用多个前端运行 worker 时，若现有产物不支持，先更新两仓库并选「重新编译前端」，再选「启动已构建版本」。此后调整数量只需保存并启动已构建版本。上面的环境变量覆盖由新版统一镜像支持。Scheduler 始终只有一个进程，不使用 Celery Beat。
 
+「进程」分组里的 Celery 执行池和并发策略均从列表选择。选「多进程（prefork）」和「按任务量自动伸缩」后，填写最小和最大并发（建议先用 1 和 4）。统一 YAML 中对应 `backend.environment.WORKER_AUTOSCALE: "4,1"`，顺序为最大、最小。任务少时缩回下限；留空则按 `WORKER_CONCURRENCY` 固定运行。旧配置保持固定模式。首次启用需要用新版部署仓库完整构建一次镜像；此后调整范围只需保存并「启动已构建版本」。
+
 ## 排错
 
 - 若旧版脚本在构建成功后出现 `KeyError: 'Config'`，原因可能是通用 `docker inspect` 匹配到了同名网络或卷。新版已限定为容器查询；更新部署脚本后直接执行 `./setup.sh --docker start`，复用 `var/built.yaml` 指向的成功产物，无需重新构建。

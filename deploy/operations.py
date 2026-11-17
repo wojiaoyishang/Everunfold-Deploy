@@ -14,6 +14,7 @@ from pathlib import Path
 
 from config_model import Check
 from storage import ROOT, lock, read, write
+from worker_capacity import PROCESS_KEYS, capacity_arguments
 
 
 def execute(args, *, cwd=None, env=None, capture=False, check=True, stdin=None):
@@ -295,6 +296,7 @@ def build(store):
     }
     if d["mode"] == "docker":
         manifest["image"] = build_image(store, directory, revisions)
+        manifest["celery_autoscale"] = True
     else:
         execute(
             [
@@ -502,8 +504,7 @@ def runtime_mounts(store, release):
         args += mount(d[role + "_data"], "/data/" + role)
     for name in (
         "API_WORKERS",
-        "WORKER_CONCURRENCY",
-        "WORKER_POOL",
+        *PROCESS_KEYS,
         "API_LOG_LEVEL",
         "WORKER_LOG_LEVEL",
         "SCHEDULER_LOG_LEVEL",
@@ -695,6 +696,12 @@ def start(store, release, *, initialize=False, foreground=False):
         raise ValueError("FRONTEND_WORKERS 必须是 1–32 之间的整数。")
     if workers != "1" and not (directory / "frontend/tools/frontend-cluster.ts").is_file():
         raise ValueError("当前前端产物不支持多个运行 worker；请用新版前端源码重新编译。")
+    capacity = capacity_arguments(
+        store.doc["backend"]["environment"]
+        | {key: os.environ[key] for key in PROCESS_KEYS if key in os.environ}
+    )
+    if "--autoscale" in capacity and d["mode"] == "docker" and not release.get("celery_autoscale"):
+        raise ValueError("当前部署镜像不支持 Celery 自动伸缩；请更新部署仓库后完整构建一次。")
     container = None
     if d["mode"] == "docker":
         ensure_docker()

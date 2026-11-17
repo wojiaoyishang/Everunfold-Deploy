@@ -22,6 +22,7 @@ from config_validation import (
     valid_port,
 )
 from storage import read
+from worker_capacity import add_capacity_fields, capacity_environment, capacity_errors
 
 
 def generated():
@@ -488,24 +489,7 @@ def configure(store, mode=None):
             )
         )
     bind(be, "API_WORKERS", "workers", "API worker 数", "1", valid=positive, group="进程")
-    bind(
-        be,
-        "WORKER_POOL",
-        "pool",
-        "Celery worker 池",
-        "solo",
-        valid=lambda s: s in {"solo", "prefork"},
-        group="进程",
-    )
-    bind(
-        be,
-        "WORKER_CONCURRENCY",
-        "concurrency",
-        "Celery worker 并发",
-        "1",
-        valid=positive,
-        group="进程",
-    )
+    add_capacity_fields(add, value, be)
     for name, label, default in (
         ("API_LOG_LEVEL", "API 日志等级", "INFO"),
         ("WORKER_LOG_LEVEL", "Worker 日志等级", "WARNING"),
@@ -559,13 +543,12 @@ def configure(store, mode=None):
                 issues.append("请选择网桥网络，不支持 host / none。")
         if value("inbound") == value("outbound"):
             issues.append("双向令牌不能相同。")
-        if value("pool") == "solo" and value("concurrency") != "1":
-            issues.append("solo 池的并发数必须是 1；并行任务请选择 prefork。")
-        return issues
+        return issues + capacity_errors(value)
 
     def apply():
         for setter in setters:
             setter()
+        be.update(capacity_environment(value))
         for name, index in (("CELERY_BROKER_URL", 1), ("CELERY_RESULT_BACKEND_URL", 2)):
             if not be[name]:
                 be[name] = urlsplit(be["REDIS_URL"])._replace(path=f"/{index}").geturl()

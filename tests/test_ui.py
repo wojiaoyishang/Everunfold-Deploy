@@ -3,6 +3,7 @@ import asyncio
 from config_ui import ACTIONS, Editor, SetupApp
 from configure import configure
 from storage import read
+from textual.widgets import DataTable, Input, OptionList
 
 
 def test_save_stays_open_and_editable(configured):
@@ -23,6 +24,34 @@ def test_save_stays_open_and_editable(configured):
 
     asyncio.run(run())
     assert read(store.path)["component"] == "everunfold-deploy"
+
+
+def test_celery_pool_and_strategy_are_lists(configured):
+    store = configured("docker")
+    config = configure(store)
+
+    async def run():
+        app = SetupApp(config)
+        async with app.run_test(size=(86, 28)) as pilot:
+            table = app.query_one(DataTable)
+            for key in ("pool", "worker_strategy"):
+                table.move_cursor(
+                    row=next(i for i, item in enumerate(config.fields) if item.key == key)
+                )
+                app.action_edit()
+                await pilot.pause()
+                assert app.screen.query_one(OptionList).highlighted == 0
+                assert not app.screen.query(Input)
+                await pilot.press("down", "enter")
+                await pilot.pause()
+            assert config.get("worker_strategy") == "auto"
+            assert not config.errors()
+            config.save()
+
+    asyncio.run(run())
+    backend = read(store.path)["backend"]["environment"]
+    assert backend["WORKER_POOL"] == "prefork"
+    assert backend["WORKER_AUTOSCALE"] == "4,1"
 
 
 def test_sync_does_not_apply_unsaved_settings(configured):

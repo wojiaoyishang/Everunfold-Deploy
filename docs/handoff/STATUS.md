@@ -2,6 +2,11 @@
 
 更新时间：2026-11-17。
 
+## Celery 自动伸缩
+
+- Docker 和原生向导以列表选择 Celery 执行池和并发策略。现有部署仍为固定并发，启用自动模式时保存 `backend.environment.WORKER_AUTOSCALE`，顺序为最大、最小。Docker 旧镜像在停止现有服务前提示完整构建；之后调整范围可直接启动已构建版本。
+- 86×28 终端的选择列表、保存值、运行参数及旧镜像防护已验证。隔离 Redis 的真实 Celery 1→4→1 测试见后端仓库。Node 和 Uvicorn 保留固定 worker。
+
 ## 前端 Node.js 运行 worker
 
 - Docker 和原生向导支持 `frontend.environment.FRONTEND_WORKERS`，默认 1，范围 1–32，与前端编译 worker 分开。设为多个时，共用前端监听端口，仍以单节点同步。

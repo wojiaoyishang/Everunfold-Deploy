@@ -219,6 +219,16 @@ def configure(store, mode=None):
         hint="仅前端配置；后端通过已认证的节点同步获知此地址。",
     )
     bind(
+        fe,
+        "FRONTEND_WORKERS",
+        "frontend_workers",
+        "前端 Node.js 运行 worker 数",
+        "1",
+        valid=lambda s: bool(re.fullmatch(r"[1-9]|[12][0-9]|3[0-2]", s)),
+        group="前端",
+        hint="默认 1，范围 1–32。共用一个端口，增加会占用更多内存；与编译 worker 数分开。",
+    )
+    bind(
         ba.setdefault("project", {}),
         "key",
         "project",

@@ -57,6 +57,10 @@ def environment(layout, role):
             NODE_ENV="production",
             PLUGINS_DIRECTORY=layout["frontend_data"] + "/plugins",
         )
+        if "FRONTEND_WORKERS" in os.environ:
+            env["FRONTEND_WORKERS"] = os.environ["FRONTEND_WORKERS"]
+    else:
+        env.pop("FRONTEND_WORKERS", None)
     if layout.get("tls_proxy_ips"):
         env["EVERUNFOLD_NODES_TLS_PROXY_IPS"] = layout["tls_proxy_ips"]
     return env

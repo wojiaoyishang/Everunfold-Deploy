@@ -135,6 +135,11 @@ def test_missing_master_cannot_regenerate_existing_instance_keys(configured):
 
 def test_environment_isolation_and_worker_overrides(configured, monkeypatch):
     store = configured()
+    form = configure(store)
+    worker_field = next(field for field in form.fields if field.key == "frontend_workers")
+    assert worker_field.value == "1"
+    form.edit(worker_field, "3")
+    form.save()
     store.render()
     layout = {
         "backend_config": str(store.path_for("backend")),
@@ -147,9 +152,14 @@ def test_environment_isolation_and_worker_overrides(configured, monkeypatch):
     }
     monkeypatch.setenv("CONFIG_FILE", "/wrong/unified.yaml")
     monkeypatch.setenv("API_WORKERS", "3")
+    assert read(store.path_for("frontend"))["environment"]["FRONTEND_WORKERS"] == "3"
+    assert store.doc["deployment"]["build_workers"] == "2"
+    monkeypatch.setenv("FRONTEND_WORKERS", "2")
     assert environment(layout, "backend")["CONFIG_FILE"] == str(store.path_for("backend"))
+    assert "FRONTEND_WORKERS" not in environment(layout, "backend")
     front = environment(layout, "frontend")
     assert front["CONFIG_FILE"] == str(store.path_for("frontend"))
+    assert front["FRONTEND_WORKERS"] == "2"
     assert store.doc["backend"]["assistant"]["inbound_env"] not in front
     assert commands(layout)["api"][1][commands(layout)["api"][1].index("--workers") + 1] == "3"
 

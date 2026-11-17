@@ -117,14 +117,14 @@
 已有独立插件目录不会被自动删除；移除插件时先停用对应功能，再处理它的数据目录。
 npm 缓存位于前端数据目录的 `npm-cache/`，重建无需从零下载。旧版本产物和缓存不自动清理，确认不再需要后由部署者清理。
 
-API worker、Celery 池/并发及日志等级从各自 YAML 的 `environment` 读取，容器创建时也允许相应环境变量覆盖：
+API worker、Celery 池/并发、前端运行 worker 及日志等级从各自 YAML 的 `environment` 读取。向导的「前端 Node.js 运行 worker 数」对应 `frontend.environment.FRONTEND_WORKERS`，默认 `"1"`，范围 1–32。前端运行 worker 共用一个监听端口，每个进程会增加内存占用。
 
 ```bash
-API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 ./setup.sh --docker start
+API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 FRONTEND_WORKERS=2 ./setup.sh --docker start
 ```
 
 两种构建操作共用向导中的「前端编译 worker 数」和「Node 编译内存 MiB」。编译容器分别从 `FRONTEND_BUILD_WORKERS` 与 `NODE_OPTIONS` 读取这两个设置。
-前端运行一个 Node 服务；Scheduler 始终一个，不使用 Celery Beat。
+首次启用多个前端运行 worker 时，若现有产物不支持，先更新两仓库并选「重新编译前端」，再选「启动已构建版本」。此后调整数量只需保存并启动已构建版本。上面的环境变量覆盖由新版统一镜像支持。Scheduler 始终只有一个进程，不使用 Celery Beat。
 
 ## 排错
 

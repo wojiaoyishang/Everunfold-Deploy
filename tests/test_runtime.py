@@ -224,6 +224,18 @@ def test_start_resumes_existing_build_without_git_or_npm(configured, monkeypatch
     assert starts == [(store, release, {"initialize": False, "foreground": False})]
 
 
+def test_old_frontend_release_rejects_multi_worker_before_stop(configured, monkeypatch):
+    store = configured("docker")
+    release = {"mode": "docker", "release": "old"}
+    artifact = store.var / "releases/old/frontend/.next/BUILD_ID"
+    artifact.parent.mkdir(parents=True)
+    artifact.touch()
+    monkeypatch.setenv("FRONTEND_WORKERS", "2")
+    monkeypatch.setattr(operations, "stop", lambda *_: pytest.fail("old release must stay up"))
+    with pytest.raises(ValueError, match="不支持多个运行 worker"):
+        operations.start(store, release)
+
+
 def test_supervisor_stops_all_children_on_unexpected_exit(tmp_path, monkeypatch):
     marker = tmp_path / "pid"
     monkeypatch.setattr(

@@ -33,7 +33,7 @@ Docker 前端单独编译复用最后成功构建记录的镜像与后端快照�
 ## 进程管理
 
 Docker 中 `--init` 配合 Python supervisor；直接部署中用户级 systemd 管理同一 supervisor。
-supervisor 为 API、Celery worker、Scheduler 和 Node 分别创建进程组；任一意外退出都停止所有组，并返回非零。
+supervisor 为 API、Celery worker、Scheduler 和 Node 分别创建进程组；任一意外退出都停止所有组，并返回非零。Node 进程组的 Web worker 数由 `FRONTEND_WORKERS` 控制，默认为 1。多个 worker 共用原端口，插件上报和同步检查仍由单个协调进程负责。
 SIGTERM/SIGINT 提供 35 秒退出时间，再清理残留子进程。数据目录的排他锁阻止同实例重复启动 Scheduler。
 容器重启按校验归属后的完整容器 ID 执行，并检查两端就绪。容器/systemd 重启只执行 serve；清单登记、Git、npm、配对和数据库 DDL 都有各自的部署入口。
 

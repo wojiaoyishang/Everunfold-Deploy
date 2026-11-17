@@ -507,6 +507,7 @@ def runtime_mounts(store, release):
         "API_LOG_LEVEL",
         "WORKER_LOG_LEVEL",
         "SCHEDULER_LOG_LEVEL",
+        "FRONTEND_WORKERS",
     ):
         if name in os.environ:
             args += ["-e", name]
@@ -687,6 +688,13 @@ def start(store, release, *, initialize=False, foreground=False):
         raise ValueError("部署方式已改变，请重新构建。")
     if not (directory / "frontend/.next/BUILD_ID").is_file():
         raise ValueError("缺少前端编译产物，请先构建。")
+    workers = os.environ.get(
+        "FRONTEND_WORKERS", store.doc["frontend"]["environment"].get("FRONTEND_WORKERS", "1")
+    )
+    if not re.fullmatch(r"[1-9]|[12][0-9]|3[0-2]", workers):
+        raise ValueError("FRONTEND_WORKERS 必须是 1–32 之间的整数。")
+    if workers != "1" and not (directory / "frontend/tools/frontend-cluster.ts").is_file():
+        raise ValueError("当前前端产物不支持多个运行 worker；请用新版前端源码重新编译。")
     container = None
     if d["mode"] == "docker":
         ensure_docker()

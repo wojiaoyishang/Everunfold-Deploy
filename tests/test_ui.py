@@ -56,7 +56,13 @@ def test_docker_quick_actions_fit_and_restart_leaves_draft_unsaved(configured):
     async def run():
         app = SetupApp(config)
         async with app.run_test(size=(86, 28)) as pilot:
-            for action in ("rebuild-frontend", "start", "restart"):
+            for action in (
+                "rebuild-frontend",
+                "start",
+                "restart",
+                "build-plugins",
+                "hot-update-frontend",
+            ):
                 assert app.query_one("#" + action).region.bottom < 28
             await pilot.click("#restart")
             await pilot.pause()

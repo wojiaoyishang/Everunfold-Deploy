@@ -13,14 +13,15 @@ import time
 from pathlib import Path
 
 from config_model import Check
-from storage import ROOT, read, write
+from storage import ROOT, lock, read, write
 
 
-def execute(args, *, cwd=None, env=None, capture=False, check=True):
+def execute(args, *, cwd=None, env=None, capture=False, check=True, stdin=None):
     result = subprocess.run(
         [str(a) for a in args],
         cwd=cwd,
         env=env,
+        stdin=stdin,
         text=True,
         stdout=subprocess.PIPE if capture else None,
         check=False,
@@ -220,14 +221,16 @@ def build_image(store, directory, revisions):
     return image
 
 
-def compile_frontend(store, directory, image=None):
+def compile_frontend(store, directory, image=None, *, plugins_only=False):
     d = store.doc["deployment"]
     cache = Path(d["frontend_data"]) / "npm-cache"
     plugins = directory / "plugins"
     for path in (cache, plugins):
         path.mkdir(parents=True, exist_ok=True)
     memory = "--max-old-space-size=" + d["build_memory"]
-    commands = (("build", "frontend"), ("build-plugins",))
+    commands = (
+        (("build-plugins",),) if plugins_only else (("build", "frontend"), ("build-plugins",))
+    )
     if image:
         builder = [
             "--user",
@@ -249,7 +252,11 @@ def compile_frontend(store, directory, image=None):
         env = {
             **build_environment(),
             "SOURCE_ROOT": d["frontend_source"],
-            "BUILD_ROOT": str(store.var / "build" / directory.name / "work"),
+            "BUILD_ROOT": str(
+                directory / "work"
+                if plugins_only
+                else store.var / "build" / directory.name / "work"
+            ),
             "OUTPUT_ROOT": str(directory),
             "PLUGIN_OUTPUT": str(plugins),
             "npm_config_cache": str(cache),
@@ -258,7 +265,7 @@ def compile_frontend(store, directory, image=None):
         }
         for args in commands:
             execute(["bash", ROOT / "docker/frontend-build.sh", *args], env=env)
-    if not (directory / "frontend/.next/BUILD_ID").is_file():
+    if not plugins_only and not (directory / "frontend/.next/BUILD_ID").is_file():
         raise ValueError("缺少前端编译产物，无法发布构建版本。")
 
 
@@ -313,6 +320,88 @@ def require_image(image):
         raise ValueError(
             f"无法使用已有运行镜像 {image}。请恢复该镜像，或运行 ./setup.sh --docker build。"
         ) from error
+
+
+def frontend_deploy_tool(store, relative):
+    path = Path(store.doc["deployment"]["frontend_source"]) / relative
+    if not path.is_file():
+        raise ValueError(f"前端源码目录缺少 {relative}，请先更新前端源码仓库。")
+    return path
+
+
+def build_frontend_plugins(store):
+    d = store.doc["deployment"]
+    image = None
+    if d["mode"] == "docker":
+        ensure_docker()
+        release = read(store.var / "built.yaml")
+        if release.get("mode") != "docker" or not release.get("image"):
+            raise ValueError("请先进行一次 Docker 构建，准备可复用的前端构建镜像。")
+        image = release["image"]
+        require_image(image)
+        ensure_networks(d)
+    data = Path(d["frontend_data"]).resolve()
+    with lock(data / ".plugin-release.lock"):
+        update_sources(store, ("frontend",))
+        stage_tool = frontend_deploy_tool(store, "deploy/plugin_stage.py")
+        with tempfile.TemporaryDirectory(prefix=".plugin-build.", dir=data) as stage:
+            compile_frontend(store, Path(stage), image, plugins_only=True)
+            execute([sys.executable, stage_tool, Path(stage) / "plugins", data])
+
+
+def hot_update_frontend(store):
+    d = store.doc["deployment"]
+    data = Path(d["frontend_data"]).resolve()
+    with lock(data / ".plugin-release.lock"):
+        inbox = data / "plugin-inbox"
+        inbox.mkdir(exist_ok=True)
+        print(f"待发布目录：{inbox}", flush=True)
+        script = frontend_deploy_tool(store, "tools/plugins/publish.mjs")
+        if d["mode"] == "docker":
+            active = read(store.var / "active.yaml")
+            if active.get("mode") != "docker" or not active.get("release"):
+                raise ValueError("请先按当前部署方式启动服务。")
+            release_id = active["release"]
+            container = deployment_container(store)
+            if not container or not (container.get("State") or {}).get("Running"):
+                raise ValueError("请先启动此部署的容器。")
+            if not any(
+                item.get("Destination") == "/data/frontend"
+                and Path(item.get("Source", "")).resolve() == data
+                for item in container.get("Mounts", [])
+            ):
+                raise ValueError("运行中的容器使用其他前端数据目录，请核对保存的配置。")
+            with script.open("rb") as program:
+                execute(
+                    [
+                        "docker",
+                        "exec",
+                        "-i",
+                        "--workdir",
+                        "/workspace/frontend",
+                        container["Id"],
+                        "node",
+                        "--import",
+                        "tsx",
+                        "--input-type=module",
+                        "-",
+                        "/data/frontend",
+                    ],
+                    stdin=program,
+                )
+        else:
+            layout = read(store.runtime / "runtime.yaml")
+            frontend = Path(layout.get("frontend_root", ""))
+            if not (frontend / ".next/BUILD_ID").is_file() or not layout.get("node"):
+                raise ValueError("请先通过向导启动前端，生成运行布局。")
+            if Path(layout.get("frontend_data", "")).resolve() != data:
+                raise ValueError("运行布局使用其他前端数据目录，请核对保存的配置。")
+            release_id = frontend.parent.name
+            execute(
+                [layout["node"], "--import", "tsx", script, str(data)],
+                cwd=frontend,
+            )
+        write(data / ".plugin-host.yaml", {"release": release_id})
 
 
 def rebuild_frontend(store):
@@ -607,15 +696,21 @@ def start(store, release, *, initialize=False, foreground=False):
         ensure_native_service()
     for role in ("backend", "frontend"):
         Path(d[role + "_data"]).mkdir(parents=True, exist_ok=True)
-    # Stop before re-pairing. A failed prepare leaves the previous release on disk.
-    if not foreground:
-        stop(store)
-    store.render()
-    layout_for(store, release)
-    runtime_action(store, release, "prepare-init" if initialize else "prepare")
-    store.import_runtime()
-    store.save()
-    publish_plugins(directory / "plugins", Path(d["frontend_data"]) / "plugins")
+    frontend_data = Path(d["frontend_data"])
+    with lock(frontend_data / ".plugin-release.lock"):
+        # Stop before re-pairing. A failed prepare leaves the previous release on disk.
+        if not foreground:
+            stop(store)
+        store.render()
+        layout_for(store, release)
+        runtime_action(store, release, "prepare-init" if initialize else "prepare")
+        store.import_runtime()
+        store.save()
+        marker = frontend_data / ".plugin-host.yaml"
+        plugins = frontend_data / "plugins"
+        if read(marker).get("release") != release["release"] or not plugins.is_dir():
+            publish_plugins(directory / "plugins", plugins)
+            marker.unlink(missing_ok=True)
     if foreground:
         runtime_action(store, release, "serve")
         return

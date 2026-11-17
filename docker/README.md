@@ -87,13 +87,17 @@
 
 | 向导操作 | 命令 | 适用情况 |
 | --- | --- | --- |
-| 重新编译前端 | `./setup.sh --docker rebuild-frontend` | 前端或前端插件源码更新，复用最后一次成功构建的镜像和后端快照 |
+| 重新编译前端 | `./setup.sh --docker rebuild-frontend` | 前端主体更新，复用最后一次成功构建的镜像和后端快照 |
+| 编译前端插件 | `./setup.sh --docker build-plugins` | 仅编译前端插件源码，产物进入前端数据目录的 `plugin-inbox/` |
+| 热更新前端 | `./setup.sh --docker hot-update-frontend` | 将 `plugin-inbox/` 中的插件包发布到运行中的前端 |
 | 启动已构建版本 | `./setup.sh --docker start` | 应用新产物或新的挂载、端口及网络配置 |
 | 重启容器 | `./setup.sh --docker restart` | 使用原容器和当前产物重新启动，等待前后端就绪 |
 | 保存并构建 | `./setup.sh --docker build` | 准备完整版本，运行中的服务继续使用原产物 |
 | 构建并启动 | `./setup.sh --docker deploy` | 完整构建并应用 |
 
-前端更新用 `rebuild-frontend`，成功后再用 `start` 切换产物。开启自动拉取时只更新前端源码，复用上次构建记录中的镜像和后端快照。向导会先保存当前设置。编译在临时容器中执行，前端宿主与插件都成功后才登记新版本。新产物的源码版本以 `var/releases/<版本>/release.yaml` 为准，复用镜像的标签记录的是首次完整构建。若原镜像或快照已清理，先执行一次完整 `build`。
+前端主体更新用 `rebuild-frontend`，成功后再用 `start` 切换产物。开启自动拉取时只更新前端源码，复用上次构建记录中的镜像和后端快照。向导会先保存当前设置。编译在临时容器中执行，前端宿主与插件都成功后才登记新版本。新产物的源码版本以 `var/releases/<版本>/release.yaml` 为准，复用镜像的标签记录的是首次完整构建。若原镜像或快照已清理，先执行一次完整 `build`。
+
+只更新前端插件时，确认所选前端源码仓库已经包含最新部署工具。插件源码放在该仓库的 `src/plugins/<目录名>/`，执行 `build-plugins` 后再执行 `hot-update-frontend`。收到受信任的预编译包时，直接解压到前端数据目录，以 `plugin-inbox/<目录名>/manifest.json` 为入口，再执行 `hot-update-frontend`。热更新校验全部待发布包并公布新清单，无需编译或重启。启停仍由站点设置控制。
 
 `restart` 只重启通过归属校验的现有容器，使用现有镜像、挂载、端口和配置。向导里未保存的修改会保留。若之前用 `stop` 删除了容器，使用 `start` 从构建产物启动。
 

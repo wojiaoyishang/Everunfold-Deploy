@@ -65,6 +65,8 @@ sudo loginctl enable-linger 部署用户名
 自动拉取关闭时使用工作树现状；开启时仅允许干净仓库快进更新。
 更改配置后运行 `start` 即可重新启动，无需重新编译。若改了依赖、代码或部署方式，先 `build`。
 
+已有前端运行布局时，向导也可以单独「编译前端插件」和「热更新前端」。命令是 `./setup.sh --native build-plugins` 和 `./setup.sh --native hot-update-frontend`。源码放在前端源码目录的 `src/plugins/<目录名>/`。受信任的预编译包直接解压到前端数据目录的 `plugin-inbox/<目录名>/`，其中包含 `manifest.json`，即可热更新。所选前端源码仓库需要包含新版发布工具。
+
 `API_WORKERS`、`WORKER_POOL`、`WORKER_CONCURRENCY` 和日志等级可以在向导中编辑，保存到 `backend.environment`。
 前台 `run` 也读取进程环境覆盖。systemd 服务请通过向导或该用户服务的 Environment 覆盖设置，不依赖交互 shell 导出的变量。
 

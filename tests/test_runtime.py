@@ -267,6 +267,66 @@ def test_runtime_mounts_and_readonly_boundary(configured):
     assert any("target=/data/frontend" in s for s in args)
 
 
+def test_hot_update_uses_the_running_artifact_with_no_build(configured, monkeypatch):
+    store = configured("docker")
+    settings = store.doc["deployment"]
+    data = Path(settings["frontend_data"])
+    script = Path(settings["frontend_source"]) / "tools/plugins/publish.mjs"
+    script.parent.mkdir(parents=True)
+    script.write_text("// publisher")
+    release = {"mode": "docker", "release": "current"}
+    write(store.var / "active.yaml", release)
+    container = {
+        "Id": "b" * 64,
+        "State": {"Running": True},
+        "Mounts": [{"Destination": "/data/frontend", "Source": "/other"}],
+    }
+    monkeypatch.setattr(operations, "deployment_container", lambda _: container)
+    calls = []
+    monkeypatch.setattr(
+        operations, "execute", lambda args, *, stdin: calls.append((args, stdin.read()))
+    )
+    with pytest.raises(ValueError, match="其他前端数据目录"):
+        operations.hot_update_frontend(store)
+    assert not calls
+    container["Mounts"][0]["Source"] = str(data)
+    operations.hot_update_frontend(store)
+    assert calls[0][0][:6] == [
+        "docker",
+        "exec",
+        "-i",
+        "--workdir",
+        "/workspace/frontend",
+        container["Id"],
+    ]
+    assert calls[0][0][-1] == "/data/frontend"
+    assert calls[0][1] == b"// publisher"
+    assert read(data / ".plugin-host.yaml") == {"release": "current"}
+    assert read(store.var / "active.yaml") == release
+
+
+def test_starting_same_host_keeps_the_hot_updated_plugins(configured, monkeypatch):
+    store = configured()
+    data = Path(store.doc["deployment"]["frontend_data"])
+    live = data / "plugins/test-plugin/manifest.json"
+    live.parent.mkdir(parents=True)
+    live.write_text("hot")
+    marker = data / ".plugin-host.yaml"
+    write(marker, {"release": "old"})
+    monkeypatch.setattr(operations, "runtime_action", lambda *args: None)
+    for release, expected in (("old", "hot"), ("new", "new")):
+        staged = store.var / "releases" / release
+        host = staged / "frontend/.next/BUILD_ID"
+        host.parent.mkdir(parents=True)
+        host.touch()
+        candidate = staged / "plugins/test-plugin/manifest.json"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text(release)
+        operations.start(store, {"mode": "native", "release": release}, foreground=True)
+        assert live.read_text() == expected
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize("plugins_fail", [False, True])
 def test_rebuild_frontend_uses_saved_image_and_stages_only_on_success(
     configured, monkeypatch, plugins_fail

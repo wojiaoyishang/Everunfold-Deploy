@@ -372,8 +372,10 @@ def test_restart_operates_on_owned_id_without_replacing_deployment(configured, m
     assert not (store.var / "active.yaml").exists()
 
 
-def test_start_uses_candidate_mount_and_existing_image(configured, monkeypatch):
+@pytest.mark.parametrize("frontend_bind", ["2001:db8::2", ""])
+def test_start_uses_candidate_mount_and_existing_image(configured, monkeypatch, frontend_bind):
     store = configured("docker")
+    store.doc["deployment"].update(backend_bind="0.0.0.0", frontend_bind=frontend_bind)
     release = {"release": "new-web", "mode": "docker", "image": "everunfold:old-image"}
     directory = store.var / "releases/new-web/frontend/.next"
     directory.mkdir(parents=True)
@@ -391,6 +393,10 @@ def test_start_uses_candidate_mount_and_existing_image(configured, monkeypatch):
     monkeypatch.setattr(operations, "wait_until_ready", lambda *args: None)
     operations.start(store, release)
     create = next(args for args in calls if args[:2] == ["docker", "create"])
+    expected = ["0.0.0.0:3434:8001"]
+    if frontend_bind:
+        expected.append("[2001:db8::2]:3000:3000")
+    assert [port for flag, port in zip(create, create[1:]) if flag == "-p"] == expected
     assert create[-2:] == [release["image"], "serve"]
     assert any(value.endswith("new-web/frontend,target=/workspace/frontend") for value in create)
     assert calls[-1] == ["docker", "start", "a" * 64]

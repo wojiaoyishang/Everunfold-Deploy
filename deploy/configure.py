@@ -14,6 +14,7 @@ from config_model import Configuration, Field
 from config_validation import (
     db_url,
     identifier,
+    peer_list,
     positive,
     public_url,
     redis_url,
@@ -47,7 +48,6 @@ def defaults(store, mode=None):
         "extra_networks": "",
         "host_gateway": "1",
         "tls_proxy_network": "",
-        "bind": "127.0.0.1",
         "backend_port": "3434",
         "frontend_port": "3000",
         "build_workers": "2",
@@ -59,6 +59,7 @@ def defaults(store, mode=None):
     if mode:
         d["mode"] = mode
     for role in ("backend", "frontend"):
+        d.setdefault(role + "_bind", d.get("bind", "127.0.0.1"))
         d.setdefault(
             role + "_repo",
             f"https://github.com/wojiaoyishang/Everunfold-{role.title()}.git",
@@ -169,9 +170,21 @@ def configure(store, mode=None):
         empty="不自动信任",
         hint="例如 1panel-network。启动时读取其网关 IP，供两端 HTTPS 节点页信任宿主反代。",
     )
-    dep("bind", "宿主映射 IP", valid=lambda s: valid_ip(s), active=docker_active)
-    for role, label in (("backend", "后端宿主端口"), ("frontend", "前端宿主端口")):
-        dep(role + "_port", label, valid=valid_port, active=docker_active)
+    for role, title in (("backend", "后端"), ("frontend", "前端")):
+        dep(
+            role + "_bind",
+            title + "宿主映射绑定 IP",
+            valid=lambda s: not s or valid_ip(s),
+            active=docker_active,
+            empty="不映射",
+            hint="127.0.0.1 供宿主反代；0.0.0.0 绑定全部 IPv4 接口；也可填宿主具体 IP。留空关闭映射。",
+        )
+        dep(
+            role + "_port",
+            title + "宿主映射端口",
+            valid=valid_port,
+            active=lambda role=role: docker_active() and bool(value(role + "_bind")),
+        )
     for key, label in (("uid", "容器运行 UID"), ("gid", "容器运行 GID")):
         dep(
             key,
@@ -348,6 +361,20 @@ def configure(store, mode=None):
             group="自动配对",
             hint="统一写入两端，无需导出或导入 Base64。已有部署沿用原值。",
         )
+    internal_auth = ba.setdefault("internal_auth", {})
+    add(
+        "backend_peers",
+        "外部前端调用后端的来源 IP/CIDR",
+        ", ".join(internal_auth.get("allowed_peer_ips") or ["127.0.0.1", "::1"]),
+        valid=peer_list,
+        group="自动配对",
+        hint="填写后端实际看到的直连地址，逗号分隔。统一容器内的回环地址会自动保留。",
+    )
+    setters.append(
+        lambda: internal_auth.update(
+            allowed_peer_ips=[ip.strip() for ip in value("backend_peers").split(",") if ip.strip()]
+        )
+    )
     for role, config, env, title in (
         ("backend", ba, be, "后端"),
         ("frontend", fa, fe, "前端"),
@@ -506,8 +533,16 @@ def configure(store, mode=None):
         if value("backend_listen") == value("frontend_listen"):
             issues.append("前后端是两个进程，监听端口不能相同。")
         if docker_active():
-            if value("backend_port") == value("frontend_port"):
-                issues.append("两端宿主映射端口不能相同。")
+            hosts = [value(role + "_bind") for role in ("backend", "frontend")]
+            ports = [value(role + "_port") for role in ("backend", "frontend")]
+            if (
+                all(host and valid_ip(host) for host in hosts)
+                and all(valid_port(port) for port in ports)
+                and int(ports[0]) == int(ports[1])
+            ):
+                a, b = map(ipaddress.ip_address, hosts)
+                if a == b or (a.version == b.version and (a.is_unspecified or b.is_unspecified)):
+                    issues.append("两端宿主映射的绑定 IP 和端口冲突。")
             if any(value(r + "_host") != "0.0.0.0" for r in ("backend", "frontend")):
                 issues.append("Docker 模式的两端绑定 IP 须为 0.0.0.0，以便端口映射访问。")
             if value("network") in {"host", "none"}:
@@ -581,7 +616,7 @@ def configure(store, mode=None):
 def valid_ip(value):
     try:
         ipaddress.ip_address(value)
-        return True
+        return "%" not in value
     except ValueError:
         return False
 

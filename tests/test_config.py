@@ -184,6 +184,35 @@ def test_paths_and_port_collision_rejected(configured):
     assert any("监听端口" in error for error in form.errors())
 
 
+def test_publish_addresses_upgrade_independently_and_keep_local_peers(configured):
+    store = configured("docker")
+    deployment = store.doc["deployment"]
+    for role in ("backend", "frontend"):
+        deployment.pop(role + "_bind")
+    deployment["bind"] = "192.0.2.2"
+    form = configure(store)
+    assert form.get("backend_bind") == form.get("frontend_bind") == "192.0.2.2"
+
+    def edit(key, value):
+        form.edit(next(field for field in form.fields if field.key == key), value)
+
+    edit("backend_bind", "0.0.0.0")
+    edit("frontend_port", form.get("backend_port"))
+    assert any("绑定 IP 和端口冲突" in issue for issue in form.errors())
+    edit("frontend_bind", "")
+    edit("backend_peers", "192.0.2.4, 198.51.100.0/24")
+    assert not form.errors(), form.errors()
+    form.save()
+    assert deployment["backend_bind"] == "0.0.0.0"
+    assert deployment["frontend_bind"] == ""
+    assert store.doc["backend"]["application"]["internal_auth"]["allowed_peer_ips"] == [
+        "192.0.2.4",
+        "198.51.100.0/24",
+        "127.0.0.1",
+        "::1",
+    ]
+
+
 def test_pair_refuses_foreign_node_token_and_epoch(configured):
     store = configured()
     b, f = store.doc["backend"], store.doc["frontend"]

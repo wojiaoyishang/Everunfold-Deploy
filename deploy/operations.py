@@ -620,7 +620,6 @@ def start(store, release, *, initialize=False, foreground=False):
         runtime_action(store, release, "serve")
         return
     if d["mode"] == "docker":
-        host = "[" + d["bind"] + "]" if ":" in d["bind"] else d["bind"]
         args = [
             "--name",
             d["container"],
@@ -633,10 +632,12 @@ def start(store, release, *, initialize=False, foreground=False):
             *runtime_mounts(store, release),
         ]
         for role, key in (("backend", "API_PORT"), ("frontend", "FRONTEND_PORT")):
-            args += [
-                "-p",
-                f"{host}:{d[role + '_port']}:{store.doc[role]['environment'][key]}",
-            ]
+            host = d.get(role + "_bind", d.get("bind", "127.0.0.1"))
+            if host:
+                host = f"[{host}]" if ":" in host else host
+                mapping = f"{host}:{d[role + '_port']}:{store.doc[role]['environment'][key]}"
+                args += ["-p", mapping]
+                print(f"[start] {role} 宿主映射 {mapping}", flush=True)
         container = docker_create(d, [*args, release["image"], "serve"])
         execute(["docker", "start", container])
     else:

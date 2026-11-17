@@ -36,6 +36,7 @@ SIGTERM/SIGINT 提供 35 秒退出时间，再清理残留子进程。数据目�
 容器重启按校验归属后的完整容器 ID 执行，并检查两端就绪。容器/systemd 重启只执行 serve；清单登记、Git、npm、配对和数据库 DDL 都有各自的部署入口。
 
 两端各自一个监听端口，前端网页与接收器共用该端口。统一部署内部使用回环 URL，对外发布 URL 独立配置。
+Docker 的 `deployment.backend_bind` 与 `deployment.frontend_bind` 独立控制宿主发布地址，沿用旧 `deployment.bind` 作为升级默认值；空值不发布。宿主绑定与进程监听分开，改变映射需要重新创建容器。
 宿主机反代信任网关按选定 Docker 网络解析，不能将内部调用的整个 CIDR 白名单等同于 HTTPS 代理信任。
 
 ## 当前边界

@@ -43,3 +43,25 @@ def test_sync_does_not_apply_unsaved_settings(configured):
     asyncio.run(run())
     assert store.path.read_bytes() == saved
     assert config.get("database") == changed_database
+
+
+def test_docker_quick_actions_fit_and_restart_leaves_draft_unsaved(configured):
+    store = configured("docker")
+    saved = store.path.read_bytes()
+    config = configure(store)
+    field = next(item for item in config.fields if item.key == "database")
+    database = "postgresql+asyncpg://test:test@127.0.0.1:5433/test"
+    config.edit(field, database)
+
+    async def run():
+        app = SetupApp(config)
+        async with app.run_test(size=(86, 28)) as pilot:
+            for action in ("rebuild-frontend", "start", "restart"):
+                assert app.query_one("#" + action).region.bottom < 28
+            await pilot.click("#restart")
+            await pilot.pause()
+            assert app.return_value == ACTIONS["restart"]
+
+    asyncio.run(run())
+    assert store.path.read_bytes() == saved
+    assert config.get("database") == database

@@ -54,23 +54,31 @@
 
 ## 重启、更新和迁移
 
+| 向导操作 | 命令 | 适用情况 |
+| --- | --- | --- |
+| 重新编译前端 | `./setup.sh --docker rebuild-frontend` | 前端或前端插件源码更新，复用最后一次成功构建的镜像和后端快照 |
+| 启动已构建版本 | `./setup.sh --docker start` | 应用新产物或新的挂载、端口及网络配置 |
+| 重启容器 | `./setup.sh --docker restart` | 使用原容器和当前产物重新启动，等待前后端就绪 |
+| 保存并构建 | `./setup.sh --docker build` | 准备完整版本，运行中的服务继续使用原产物 |
+| 构建并启动 | `./setup.sh --docker deploy` | 完整构建并应用 |
+
+前端更新用 `rebuild-frontend`，成功后再用 `start` 切换产物。开启自动拉取时只更新前端源码，复用上次构建记录中的镜像和后端快照。向导会先保存当前设置。编译在临时容器中执行，前端宿主与插件都成功后才登记新版本。新产物的源码版本以 `var/releases/<版本>/release.yaml` 为准，复用镜像的标签记录的是首次完整构建。若原镜像或快照已清理，先执行一次完整 `build`。
+
+`restart` 只重启通过归属校验的现有容器，使用现有镜像、挂载、端口和配置。向导里未保存的修改会保留。若之前用 `stop` 删除了容器，使用 `start` 从构建产物启动。
+
+后端代码、依赖或部署运行镜像更新时用完整 `build`。若版本要求迁移，备份后用 `./setup.sh --docker migrate` 停止本实例并显式升级，再运行 `start`。
+
 ```bash
-docker restart everunfold       # 仅重启现有进程，不编译、不做 DDL
-./setup.sh --docker deploy      # 更新代码，构建并重新创建容器
-./setup.sh --docker build       # 只构建，保留正在运行的版本
-./setup.sh --docker migrate     # 先备份数据库；停止本实例后显式执行迁移
-./setup.sh --docker start       # 启动最后成功构建的版本
-./setup.sh --docker sync        # 使用运行容器触发已配对节点的同步
+./setup.sh --docker sync        # 触发已配对节点的同步
 ./setup.sh --docker stop        # 停止并删除本实例容器，保留数据与产物
-./setup.sh logs
+./setup.sh --docker logs        # 查看运行日志
 ```
 
-升级流程：先 `build`；若版本需要迁移，备份数据库后 `migrate`；再 `start`。
 “初始化数据库并构建启动”只初始化确认空的数据库；已有非空库不会被清空。
 迁移失败或启动准备失败不会自动回滚数据库，日志会指出下一步。
 “触发同步”使用当前运行容器的后端配置和版本。更新部署程序和后端后首次使用时，需先构建并启动支持此操作的版本。
 
-每次 build 会分别构建宿主和插件，将插件写入候选目录，全部成功才发布；内容哈希文件增量复制、manifest 最后原子替换。
+完整构建和前端单独编译都会分别构建宿主和插件，将插件写入候选目录，全部成功才发布；内容哈希文件增量复制、manifest 最后原子替换。
 已有独立插件目录不会被自动删除；移除插件时先停用对应功能，再处理它的数据目录。
 npm 缓存位于前端数据目录的 `npm-cache/`，重建无需从零下载。旧版本产物和缓存不自动清理，确认不再需要后由部署者清理。
 
@@ -80,7 +88,7 @@ API worker、Celery 池/并发及日志等级从各自 YAML 的 `environment` �
 API_WORKERS=2 WORKER_POOL=prefork WORKER_CONCURRENCY=2 ./setup.sh --docker start
 ```
 
-前端编译并行度在向导“前端编译 worker 数”设置，并通过 `FRONTEND_BUILD_WORKERS` 传给编译容器。
+两种构建操作共用向导中的「前端编译 worker 数」和「Node 编译内存 MiB」。编译容器分别从 `FRONTEND_BUILD_WORKERS` 与 `NODE_OPTIONS` 读取这两个设置。
 前端运行一个 Node 服务；Scheduler 始终一个，不使用 Celery Beat。
 
 ## 排错

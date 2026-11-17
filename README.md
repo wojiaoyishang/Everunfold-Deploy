@@ -42,12 +42,16 @@ cd Everunfold-Deploy
 已有数据库需要迁移时会停止并提示，使用“升级迁移”显式处理。
 
 ```bash
-./setup.sh --docker build       # 拉取并编译，不替换运行中的服务
-./setup.sh --docker start       # 启动最后一次成功构建，不重新编译
-./setup.sh --docker deploy      # 拉取、构建、检查、配对、同步插件清单并启动
+./setup.sh --docker rebuild-frontend  # 复用已有镜像，只编译前端和前端插件
+./setup.sh --docker start             # 应用最后一次成功构建
+./setup.sh --docker restart           # 重启已创建的容器
+./setup.sh --docker build             # 完整构建，暂不切换运行版本
+./setup.sh --docker deploy            # 完整构建后启动
 ./setup.sh sync                 # 触发已配对节点的同步
 ./setup.sh logs                 # 查看合并后的前后端日志
 ```
+
+日常前端更新在向导选择「重新编译前端」，成功后选择「启动已构建版本」。后者复用镜像并挂载新产物。只想重启当前服务时，选择「重启容器」，容器会继续使用当前挂载的版本。
 
 详细的端口、挂载、1Panel 网络和升级步骤见 [Docker 教程](docker/README.md)。
 

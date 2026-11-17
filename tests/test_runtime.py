@@ -2,11 +2,12 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import operations
 import pytest
 import runtime
-from storage import write
+from storage import read, write
 
 
 def test_docker_attaches_extra_network_before_start(monkeypatch):
@@ -264,3 +265,133 @@ def test_runtime_mounts_and_readonly_boundary(configured):
     assert any("target=/config" in s and "readonly" not in s for s in args)
     assert any("target=/data/backend" in s for s in args)
     assert any("target=/data/frontend" in s for s in args)
+
+
+@pytest.mark.parametrize("plugins_fail", [False, True])
+def test_rebuild_frontend_uses_saved_image_and_stages_only_on_success(
+    configured, monkeypatch, plugins_fail
+):
+    import main
+
+    store = configured("docker")
+    deployment = store.doc["deployment"]
+    source = Path(deployment["frontend_source"])
+    for name in ("package-lock.json", "contracts.lock.json", "tools/plugins/run.mts"):
+        file = source / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.touch()
+    previous = {
+        "release": "existing-build",
+        "mode": "docker",
+        "image": "everunfold:existing-build",
+        "revisions": {"backend": "original-api", "frontend": "old-web"},
+        "dirty": {"backend": False, "frontend": False},
+    }
+    old_backend = store.var / "releases" / "existing-build/backend"
+    old_backend.mkdir(parents=True)
+    (old_backend / "marker").write_text("original snapshot")
+    write(store.var / "built.yaml", previous)
+    write(store.var / "active.yaml", previous)
+    calls = []
+
+    def execute(args, **kwargs):
+        calls.append(args)
+        if args[:2] == ["docker", "create"]:
+            output = next(value for value in args if value.endswith(",target=/output"))
+            stage = Path(output.removeprefix("type=bind,source=").removesuffix(",target=/output"))
+            if args[-2:] == ["build", "frontend"]:
+                build_id = stage / "frontend/.next/BUILD_ID"
+                build_id.parent.mkdir(parents=True)
+                build_id.write_text("new frontend")
+                return "host-id"
+            assert args[-1] == "build-plugins"
+            (stage / "plugins/manifest.json").write_text("{}")
+            return "plugin-id"
+        if args[:3] == ["docker", "container", "inspect"]:
+            return "1" if args[-1] == "plugin-id" and plugins_fail else "0"
+        return ""
+
+    monkeypatch.setattr(operations, "ensure_networks", lambda _: None)
+    monkeypatch.setattr(operations, "execute", execute)
+    monkeypatch.setattr(operations, "source_revision", lambda _: ("new-web", True))
+    if plugins_fail:
+        with pytest.raises(ValueError, match="临时容器执行失败"):
+            main.perform(store, "rebuild-frontend")
+    else:
+        main.perform(store, "rebuild-frontend")
+    assert read(store.var / "active.yaml") == previous
+    built = read(store.var / "built.yaml")
+    if plugins_fail:
+        assert built == previous
+    else:
+        assert built["image"] == previous["image"]
+        assert built["revisions"] == {"backend": "original-api", "frontend": "new-web"}
+        new_release = store.var / "releases" / built["release"]
+        assert new_release != old_backend.parent
+        assert (new_release / "backend/marker").read_text() == "original snapshot"
+        assert (new_release / "frontend/.next/BUILD_ID").read_text() == "new frontend"
+    builders = [args for args in calls if args[:2] == ["docker", "create"]]
+    assert len(builders) == 2
+    for args in builders:
+        assert previous["image"] in args
+        assert "FRONTEND_BUILD_WORKERS=" + deployment["build_workers"] in args
+        assert "NODE_OPTIONS=--max-old-space-size=" + deployment["build_memory"] in args
+        assert any(value.endswith("npm-cache,target=/build/npm-cache") for value in args)
+    assert all(args[1] not in {"build", "stop", "restart"} for args in calls)
+
+
+@pytest.mark.parametrize("owned", [True, False])
+def test_restart_operates_on_owned_id_without_replacing_deployment(configured, monkeypatch, owned):
+    import main
+
+    store = configured("docker")
+    container = "e" * 64
+    mutations = []
+    configuration = store.path.read_bytes()
+
+    def run(args, **kwargs):
+        if args[:3] == ["docker", "container", "inspect"]:
+            label = str(store.path) if owned else "/other/config.yaml"
+            data = [{"Id": container, "Config": {"Labels": {"org.everunfold.deployment": label}}}]
+            return subprocess.CompletedProcess(args, 0, json.dumps(data), "")
+        mutations.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(operations.subprocess, "run", run)
+    if owned:
+        main.perform(store, "restart")
+        assert mutations == [
+            ["docker", "restart", "--time", "45", container],
+            ["docker", "exec", container, "python", "/opt/everunfold/deploy/runtime.py", "health"],
+        ]
+    else:
+        with pytest.raises(ValueError, match="不属于此部署"):
+            main.perform(store, "restart")
+        assert not mutations
+    assert store.path.read_bytes() == configuration
+    assert not (store.var / "active.yaml").exists()
+
+
+def test_start_uses_candidate_mount_and_existing_image(configured, monkeypatch):
+    store = configured("docker")
+    release = {"release": "new-web", "mode": "docker", "image": "everunfold:old-image"}
+    directory = store.var / "releases/new-web/frontend/.next"
+    directory.mkdir(parents=True)
+    (directory / "BUILD_ID").write_text("new-web")
+    calls = []
+
+    def execute(args, **kwargs):
+        calls.append(args)
+        return "a" * 64 if args[:2] == ["docker", "create"] else ""
+
+    monkeypatch.setattr(operations, "execute", execute)
+    monkeypatch.setattr(operations, "ensure_networks", lambda _: None)
+    monkeypatch.setattr(operations, "inspect_container", lambda _: None)
+    monkeypatch.setattr(operations, "runtime_action", lambda *args: None)
+    monkeypatch.setattr(operations, "wait_until_ready", lambda *args: None)
+    operations.start(store, release)
+    create = next(args for args in calls if args[:2] == ["docker", "create"])
+    assert create[-2:] == [release["image"], "serve"]
+    assert any(value.endswith("new-web/frontend,target=/workspace/frontend") for value in create)
+    assert calls[-1] == ["docker", "start", "a" * 64]
+    assert read(store.var / "active.yaml") == release

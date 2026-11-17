@@ -94,3 +94,16 @@ def test_updates_disabled_do_not_call_git(configured, tmp_path):
     d["backend_repo"] = "https://invalid.example/no-network"
     (Path(d["backend_source"]) / "uncommitted").write_text("local")
     update_sources(store)
+
+
+def test_frontend_only_update_does_not_check_or_pull_backend(configured, tmp_path):
+    store = configured("docker")
+    d = repositories(store, tmp_path)
+    update_sources(store)
+    (Path(d["backend_source"]) / "keep").write_text("uncommitted backend change")
+    frontend = Path(d["frontend_repo"])
+    (frontend / "change").write_text("updated frontend")
+    git(frontend, "add", ".")
+    git(frontend, "commit", "-m", "update")
+    update_sources(store, ("frontend",))
+    assert (Path(d["frontend_source"]) / "change").read_text() == "updated frontend"

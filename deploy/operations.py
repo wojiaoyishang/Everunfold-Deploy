@@ -36,9 +36,9 @@ def repository(url):
     return url.rstrip("/").removesuffix(".git").replace("git@github.com:", "https://github.com/")
 
 
-def update_sources(store):
+def update_sources(store, roles=("backend", "frontend")):
     d = store.doc["deployment"]
-    for role in ("backend", "frontend"):
+    for role in roles:
         path = Path(d[role + "_source"])
         remote = d[role + "_repo"]
         if d["auto_pull"] == "1":
@@ -61,15 +61,16 @@ def update_sources(store):
                 execute(["git", "-C", path, "pull", "--ff-only"])
         if not path.is_dir():
             raise ValueError(f"{role} 源码目录不存在。请开启自动拉取或准备源码：{path}")
-    for role, files in {
+    required = {
         "backend": ("pyproject.toml", "uv.lock", "deploy/runtime_check.py"),
         "frontend": (
             "package-lock.json",
             "contracts.lock.json",
             "tools/plugins/run.mts",
         ),
-    }.items():
-        for file in files:
+    }
+    for role in roles:
+        for file in required[role]:
             if not (Path(d[role + "_source"]) / file).is_file():
                 raise ValueError(f"{role} 源码缺少 {file}，请检查目录和版本。")
 
@@ -162,6 +163,105 @@ def mount(source, target, readonly=False):
     ]
 
 
+def release_directory(store):
+    release = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + "-" + os.urandom(3).hex()
+    directory = store.var / "releases" / release
+    directory.mkdir(parents=True)
+    print(f"[build] Everunfold {release}；输出目录 {directory}", flush=True)
+    return directory
+
+
+def source_revision(source):
+    result = subprocess.run(
+        ["git", "-C", source, "rev-parse", "HEAD"], capture_output=True, text=True
+    )
+    revision = result.stdout.strip() if result.returncode == 0 else "local"
+    dirty = bool(
+        subprocess.run(
+            ["git", "-C", source, "status", "--porcelain"], capture_output=True, text=True
+        ).stdout.strip()
+    )
+    return revision, dirty
+
+
+def save_build(store, directory, manifest):
+    write(directory / "release.yaml", manifest)
+    write(store.var / "built.yaml", manifest)
+    print("[build] 构建成功；尚未替换运行中的服务。", flush=True)
+    return manifest
+
+
+def build_image(store, directory, revisions):
+    context = store.var / "build" / directory.name / "image"
+    (context / "backend").mkdir(parents=True)
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copy2(directory / "backend" / name, context / "backend" / name)
+    shutil.copytree(
+        ROOT / "deploy", context / "deploy", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    shutil.copy2(ROOT / "docker/frontend-build.sh", context / "frontend-entrypoint.sh")
+    image = "everunfold:" + directory.name.lower()
+    execute(
+        [
+            "docker",
+            "build",
+            "--progress=plain",
+            "--build-arg",
+            "BACKEND_REVISION=" + revisions["backend"],
+            "--build-arg",
+            "FRONTEND_REVISION=" + revisions["frontend"],
+            "-t",
+            image,
+            "-f",
+            ROOT / "docker/Dockerfile",
+            context,
+        ]
+    )
+    return image
+
+
+def compile_frontend(store, directory, image=None):
+    d = store.doc["deployment"]
+    cache = Path(d["frontend_data"]) / "npm-cache"
+    plugins = directory / "plugins"
+    for path in (cache, plugins):
+        path.mkdir(parents=True, exist_ok=True)
+    memory = "--max-old-space-size=" + d["build_memory"]
+    commands = (("build", "frontend"), ("build-plugins",))
+    if image:
+        builder = [
+            "--user",
+            d["uid"] + ":" + d["gid"],
+            "--entrypoint",
+            "/usr/local/bin/frontend-build",
+            "-e",
+            "FRONTEND_BUILD_WORKERS=" + d["build_workers"],
+            "-e",
+            "NODE_OPTIONS=" + memory,
+            *mount(d["frontend_source"], "/workspace", True),
+            *mount(directory, "/output"),
+            *mount(cache, "/build/npm-cache"),
+            *mount(plugins, "/plugins"),
+        ]
+        for args in commands:
+            temporary(d, [*builder, image, *args])
+    else:
+        env = {
+            **build_environment(),
+            "SOURCE_ROOT": d["frontend_source"],
+            "BUILD_ROOT": str(store.var / "build" / directory.name / "work"),
+            "OUTPUT_ROOT": str(directory),
+            "PLUGIN_OUTPUT": str(plugins),
+            "npm_config_cache": str(cache),
+            "FRONTEND_BUILD_WORKERS": d["build_workers"],
+            "NODE_OPTIONS": memory,
+        }
+        for args in commands:
+            execute(["bash", ROOT / "docker/frontend-build.sh", *args], env=env)
+    if not (directory / "frontend/.next/BUILD_ID").is_file():
+        raise ValueError("缺少前端编译产物，无法发布构建版本。")
+
+
 def build(store):
     d = store.doc["deployment"]
     if d["mode"] == "docker":
@@ -175,81 +275,20 @@ def build(store):
             if not shutil.which(tool):
                 raise ValueError(f"直接部署需要 {tool}，请先安装。")
     update_sources(store)
-    release = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + "-" + os.urandom(3).hex()
-    directory = store.var / "releases" / release
-    directory.mkdir(parents=True)
+    directory = release_directory(store)
     snapshot_backend(d["backend_source"], directory / "backend")
     revisions, dirty = {}, {}
     for role in ("backend", "frontend"):
-        result = subprocess.run(
-            ["git", "-C", d[role + "_source"], "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-        )
-        revisions[role] = result.stdout.strip() if result.returncode == 0 else "local"
-        dirty[role] = bool(
-            subprocess.run(
-                ["git", "-C", d[role + "_source"], "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-        )
-    manifest = {"release": release, "mode": d["mode"], "revisions": revisions, "dirty": dirty}
-    frontend_data = Path(d["frontend_data"])
-    for path in (
-        frontend_data / "npm-cache",
-        directory / "plugins",
-        store.var / "build" / release,
-    ):
-        path.mkdir(parents=True, exist_ok=True)
-    print(f"[build] Everunfold {release}；输出目录 {directory}", flush=True)
+        revisions[role], dirty[role] = source_revision(d[role + "_source"])
+    manifest = {
+        "release": directory.name,
+        "mode": d["mode"],
+        "revisions": revisions,
+        "dirty": dirty,
+    }
     if d["mode"] == "docker":
-        context = store.var / "build" / release / "image"
-        (context / "backend").mkdir(parents=True)
-        for name in ("pyproject.toml", "uv.lock"):
-            shutil.copy2(directory / "backend" / name, context / "backend" / name)
-        shutil.copytree(
-            ROOT / "deploy",
-            context / "deploy",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
-        shutil.copy2(ROOT / "docker/frontend-build.sh", context / "frontend-entrypoint.sh")
-        image = "everunfold:" + release.lower()
-        execute(
-            [
-                "docker",
-                "build",
-                "--progress=plain",
-                "--build-arg",
-                "BACKEND_REVISION=" + revisions["backend"],
-                "--build-arg",
-                "FRONTEND_REVISION=" + revisions["frontend"],
-                "-t",
-                image,
-                "-f",
-                ROOT / "docker/Dockerfile",
-                context,
-            ]
-        )
-        manifest["image"] = image
-        builder = [
-            "--user",
-            d["uid"] + ":" + d["gid"],
-            "--entrypoint",
-            "/usr/local/bin/frontend-build",
-            "-e",
-            "FRONTEND_BUILD_WORKERS=" + d["build_workers"],
-            "-e",
-            "NODE_OPTIONS=--max-old-space-size=" + d["build_memory"],
-            *mount(d["frontend_source"], "/workspace", True),
-            *mount(directory, "/output"),
-            *mount(frontend_data / "npm-cache", "/build/npm-cache"),
-            *mount(directory / "plugins", "/plugins"),
-        ]
-        temporary(d, [*builder, image, "build", "frontend"])
-        temporary(d, [*builder, image, "build-plugins"])
+        manifest["image"] = build_image(store, directory, revisions)
     else:
-        clean = build_environment()
         execute(
             [
                 "uv",
@@ -261,24 +300,55 @@ def build(store):
                 "--python",
                 "3.12",
             ],
-            env=clean,
+            env=build_environment(),
         )
-        env = {
-            **clean,
-            "SOURCE_ROOT": d["frontend_source"],
-            "BUILD_ROOT": str(store.var / "build" / release / "work"),
-            "OUTPUT_ROOT": str(directory),
-            "PLUGIN_OUTPUT": str(directory / "plugins"),
-            "npm_config_cache": str(frontend_data / "npm-cache"),
-            "FRONTEND_BUILD_WORKERS": d["build_workers"],
-            "NODE_OPTIONS": "--max-old-space-size=" + d["build_memory"],
-        }
-        for args in (("build", "frontend"), ("build-plugins",)):
-            execute(["bash", ROOT / "docker/frontend-build.sh", *args], env=env)
-    write(directory / "release.yaml", manifest)
-    write(store.var / "built.yaml", manifest)
-    print("[build] 构建成功；尚未替换运行中的服务。", flush=True)
-    return manifest
+    compile_frontend(store, directory, manifest.get("image"))
+    return save_build(store, directory, manifest)
+
+
+def require_image(image):
+    try:
+        execute(["docker", "image", "inspect", "--format", "{{.Id}}", image], capture=True)
+    except ValueError as error:
+        raise ValueError(
+            f"无法使用已有运行镜像 {image}。请恢复该镜像，或运行 ./setup.sh --docker build。"
+        ) from error
+
+
+def rebuild_frontend(store):
+    d = store.doc["deployment"]
+    if d["mode"] != "docker":
+        raise ValueError("重新编译前端复用 Docker 镜像，请使用 Docker 部署模式。")
+    previous = read(store.var / "built.yaml")
+    image = previous.get("image")
+    if previous.get("mode") != "docker" or not isinstance(image, str) or not image:
+        raise ValueError("没有可复用的 Docker 构建，请先运行 ./setup.sh --docker build。")
+    previous_id = previous.get("release")
+    if not isinstance(previous_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", previous_id
+    ):
+        raise ValueError("已有 Docker 构建的版本记录无效，请先执行完整构建。")
+    backend = store.var / "releases" / previous_id / "backend"
+    if not backend.is_dir():
+        raise ValueError(f"后端快照已缺失：{backend}。请先执行完整构建。")
+    ensure_docker()
+    require_image(image)
+    ensure_networks(d)
+    update_sources(store, ("frontend",))
+
+    directory = release_directory(store)
+    shutil.copytree(backend, directory / "backend")
+    revision, dirty = source_revision(d["frontend_source"])
+    manifest = {
+        **previous,
+        "release": directory.name,
+        "revisions": {**previous.get("revisions", {}), "frontend": revision},
+        "dirty": {**previous.get("dirty", {}), "frontend": dirty},
+    }
+    print(f"[build] 使用已有镜像 {image} 编译前端宿主与插件。", flush=True)
+    compile_frontend(store, directory, image)
+    save_build(store, directory, manifest)
+    print("可选择“启动已构建版本”，或运行 ./setup.sh --docker start 应用本次编译。", flush=True)
 
 
 def build_environment():
@@ -510,13 +580,28 @@ def publish_plugins(source, target):
         os.replace(temp, destination)
 
 
+def restart_container(store):
+    if store.doc["deployment"]["mode"] != "docker":
+        raise ValueError("重启容器仅适用于 Docker 部署。")
+    existing = deployment_container(store)
+    if existing is None:
+        raise ValueError("此部署没有可重启的容器，请先运行 ./setup.sh --docker start。")
+    container = existing["Id"]
+    execute(["docker", "restart", "--time", "45", container])
+    wait_until_ready(store, container)
+
+
 def start(store, release, *, initialize=False, foreground=False):
     d = store.doc["deployment"]
     directory = store.var / "releases" / release["release"]
+    if release.get("mode") != d["mode"]:
+        raise ValueError("部署方式已改变，请重新构建。")
     if not (directory / "frontend/.next/BUILD_ID").is_file():
         raise ValueError("缺少前端编译产物，请先构建。")
+    container = None
     if d["mode"] == "docker":
         ensure_docker()
+        require_image(release["image"])
         ensure_networks(d)
     elif not foreground:
         ensure_native_service()
@@ -557,15 +642,19 @@ def start(store, release, *, initialize=False, foreground=False):
     else:
         install_unit(store)
     write(store.var / "active.yaml", release)
-    print("[start] 服务已启动，等待两端就绪与首次同步…", flush=True)
+    wait_until_ready(store, container)
+
+
+def wait_until_ready(store, container=None):
+    print("[start] 服务已启动，等待两端就绪…", flush=True)
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        if d["mode"] == "docker":
+        if container is not None:
             result = subprocess.run(
                 [
                     "docker",
                     "exec",
-                    d["container"],
+                    container,
                     "python",
                     "/opt/everunfold/deploy/runtime.py",
                     "health",

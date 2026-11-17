@@ -14,6 +14,8 @@ from operations import (
     execute,
     layout_for,
     probe_document,
+    rebuild_frontend,
+    restart_container,
     runtime_action,
     start,
     stop,
@@ -40,6 +42,12 @@ def perform(store, action):
                 print(f"{item.name}: {item.state} — {item.detail}")
             if any(item.state == "error" for item in results):
                 raise ValueError("检测未通过，请修正上方问题。")
+            return
+        if action == "rebuild-frontend":
+            rebuild_frontend(store)
+            return
+        if action == "restart":
+            restart_container(store)
             return
         if action == "stop":
             stop(store)
@@ -97,9 +105,11 @@ def main():
             "import",
             "pull",
             "build",
+            "rebuild-frontend",
             "deploy",
             "init-deploy",
             "start",
+            "restart",
             "run",
             "stop",
             "logs",
@@ -134,7 +144,7 @@ def main():
     if args.action != "configure":
         if not store.path.exists():
             raise ValueError("请先运行 ./setup.sh 完成配置并保存。")
-        if args.action not in {"logs", "stop", "pull", "sync"}:
+        if args.action not in {"logs", "stop", "pull", "sync", "restart"}:
             form = configure(store, mode)
             errors = form.errors()
             if errors:
@@ -152,6 +162,9 @@ def main():
         20: "build",
         21: "deploy",
         22: "init-deploy",
+        23: "rebuild-frontend",
+        24: "restart",
+        25: "start",
         30: "init-db",
         31: "migrate",
         32: "sync",
@@ -177,14 +190,17 @@ def main():
         action = actions[result]
         print(f"\nEverunfold · {action} · {store.path}", flush=True)
         try:
-            target = Store(store.path) if action == "sync" else store
-            if action == "sync":
+            target = store
+            if action in {"sync", "restart"}:
+                if not store.path.is_file():
+                    raise ValueError("请先保存部署配置。")
+                target = Store(store.path)
                 defaults(target, mode)
             perform(target, action)
         except (OSError, ValueError) as error:
             print(f"\033[31m操作未完成：{error}\033[0m", file=sys.stderr)
         input("\n按回车返回配置向导…")
-        if action == "sync":
+        if action in {"sync", "restart"}:
             continue
         store = Store()
         mode = None

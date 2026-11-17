@@ -30,6 +30,9 @@ ACTIONS = {
     "build": 20,
     "deploy": 21,
     "init-deploy": 22,
+    "rebuild-frontend": 23,
+    "restart": 24,
+    "start": 25,
     "init-db": 30,
     "migrate": 31,
     "sync": 32,
@@ -291,6 +294,11 @@ class SetupApp(App[int]):
                 yield Button("仅保存", id="save")
                 yield Button("保存并构建", id="build", variant="success")
                 yield Button("构建并启动", id="deploy", variant="success")
+            if not self.config.native:
+                with Horizontal(classes="buttons"):
+                    yield Button("重新编译前端", id="rebuild-frontend")
+                    yield Button("启动已构建版本", id="start", variant="success")
+                    yield Button("重启容器", id="restart")
             with Horizontal(classes="buttons"):
                 yield Button("查看 / 复制选中项", id="copy_value")
                 yield Button("查看 / 复制结果", id="copy_results")
@@ -454,7 +462,7 @@ class SetupApp(App[int]):
     async def finish(self, action: str) -> None:
         if self.exporting or len(self.screen_stack) > 1:
             return
-        if action == "sync":
+        if action in {"sync", "restart"}:
             self.exit(ACTIONS[action])
             return
         if action == "import-existing":

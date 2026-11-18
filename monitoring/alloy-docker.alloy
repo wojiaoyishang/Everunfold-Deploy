@@ -50,6 +50,11 @@ loki.process "everunfold" {
       node = sys.env("EVERUNFOLD_LOG_NODE"),
     }
   }
+  stage.match {
+    selector = "{app=\"everunfold\",component!~\"" + coalesce(sys.env("EVERUNFOLD_LOG_COMPONENT_MATCH"), ".*") + "\"}"
+    action = "drop"
+    drop_counter_reason = "component_filter"
+  }
 }
 
 loki.write "central" {

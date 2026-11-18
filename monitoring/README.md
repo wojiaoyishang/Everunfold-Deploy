@@ -71,6 +71,8 @@ Docker 采集用本机 Docker socket，并通过 Everunfold 容器标签筛选�
 
 多个前端可各自在所在主机启动 Alloy，并设置 `EVERUNFOLD_LOG_NODE` 区分日志。例如用 `{app="everunfold",node="frontend-a"}` 查询。Docker 同一主机上分开采集时，为每个 Alloy 设置不同的 Compose 项目名和 `EVERUNFOLD_LOG_CONTAINER_MATCH`，例如 `/everunfold-frontend-a`（容器名正则）。每个 Alloy 可指向各自的 Loki 入口，要求日志数据也相互隔离时使用独立 Loki 或启用了租户隔离的 Loki。Alloy 直接采集应用日志，在 FastAPI 停机时仍可运行。[Alloy Docker 容器发现](https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.docker/)
 
+统一容器内的前后端也可分流。前端专用 Alloy 设置 `EVERUNFOLD_LOG_COMPONENT_MATCH=nodejs`，后端专用 Alloy 可设置 `fastapi|celery|scheduler`。留空采集全部组件，容器名过滤和组件过滤可以同时启用。[Alloy 日志过滤](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.process/#stagematch)
+
 四个应用组件的日志归为一行 JSON，保留 time、level、component、event、message 及事件字段。Grafana Explore 可以用下面的表达式显示便于阅读的行。未带 JSON 字段的工具/框架日志也会保留原文。
 
 ~~~logql

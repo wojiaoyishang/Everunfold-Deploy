@@ -696,6 +696,11 @@ def start(store, release, *, initialize=False, foreground=False):
         raise ValueError("FRONTEND_WORKERS 必须是 1–32 之间的整数。")
     if workers != "1" and not (directory / "frontend/tools/frontend-cluster.ts").is_file():
         raise ValueError("当前前端产物不支持多个运行 worker；请用新版前端源码重新编译。")
+    if store.doc["backend"]["environment"].get("EVERUNFOLD_METRICS_TOKEN") and (
+        not (directory / "backend/app/entrypoints/serve_api.py").is_file()
+        or not (directory / "frontend/tools/frontend-metrics.ts").is_file()
+    ):
+        raise ValueError("当前产物缺少监控模块；请更新前后端源码并完整构建后启动。")
     capacity = capacity_arguments(
         store.doc["backend"]["environment"]
         | {key: os.environ[key] for key in PROCESS_KEYS if key in os.environ}

@@ -133,6 +133,31 @@ def test_missing_master_cannot_regenerate_existing_instance_keys(configured):
         Store(store.path)
 
 
+def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
+    store = configured()
+    form = configure(store)
+    edits = {
+        "metrics_enabled": "1",
+        "metrics_peers": "192.0.2.5",
+        "loki_query": "192.0.2.8",
+        "loki_push": "198.51.100.0/24",
+    }
+    for key, value in edits.items():
+        form.edit(next(item for item in form.fields if item.key == key), value)
+    form.save()
+    doc = read(store.path)
+    backend = doc["backend"]["environment"]
+    frontend = doc["frontend"]["environment"]
+    assert backend["EVERUNFOLD_METRICS_TOKEN"] != backend["EVERUNFOLD_METRICS_NODE_TOKEN"]
+    assert backend["EVERUNFOLD_METRICS_NODE_TOKEN"] == frontend["EVERUNFOLD_METRICS_NODE_TOKEN"]
+    assert backend["EVERUNFOLD_METRICS_FRONTEND_URL"] == "http://127.0.0.1:3000"
+    policy = (store.var / "monitoring/loki-access.conf").read_text()
+    push, query = policy.split("location ~", 1)
+    assert "198.51.100.0/24" in push and "198.51.100.0/24" not in query
+    assert "192.0.2.8/32" in query and "192.0.2.8/32" not in push
+    assert "deny all;" in push and "deny all;" in query
+
+
 def test_environment_isolation_and_worker_overrides(configured, monkeypatch):
     store = configured()
     form = configure(store)

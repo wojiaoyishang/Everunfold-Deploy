@@ -1,0 +1,36 @@
+services:
+  alloy:
+    image: grafana/alloy:v1.21.3
+    restart: unless-stopped
+    command: ["run", "--storage.path=/var/lib/alloy", "/etc/alloy/config.alloy"]
+    environment:
+      LOKI_PUSH_URL: ${LOKI_PUSH_URL:-}
+      LOKI_USER: ${LOKI_USER:-}
+      LOKI_PASSWORD: ${LOKI_PASSWORD:-}
+      EVERUNFOLD_ENVIRONMENT: ${EVERUNFOLD_ENVIRONMENT:-production}
+    volumes:
+      - ./alloy-docker.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-positions:/var/lib/alloy
+  celery-exporter:
+    profiles: ["celery"]
+    build:
+      context: .
+      dockerfile: celery-exporter.Dockerfile
+    restart: unless-stopped
+    environment:
+      CE_BROKER_URL: ${CE_BROKER_URL:-}
+    command:
+      - --broker-transport-option
+      - "global_keyprefix=${CELERY_KEY_PREFIX:-}"
+      - --queues
+      - "${CELERY_QUEUE_NAME:-}"
+      - --retry-interval
+      - "5"
+    networks: [broker]
+volumes:
+  alloy-positions:
+networks:
+  broker:
+    external: true
+    name: ${EVERUNFOLD_MONITOR_NETWORK:-1panel-network}

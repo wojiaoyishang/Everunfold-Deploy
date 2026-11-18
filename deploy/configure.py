@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
@@ -20,6 +21,12 @@ from config_validation import (
     redis_url,
     token,
     valid_port,
+)
+from monitoring_setup import (
+    add_monitoring_fields,
+    loki_proxy_include,
+    monitor_environment,
+    monitor_errors,
 )
 from storage import read
 from worker_capacity import add_capacity_fields, capacity_environment, capacity_errors
@@ -490,6 +497,7 @@ def configure(store, mode=None):
         )
     bind(be, "API_WORKERS", "workers", "API worker 数", "1", valid=positive, group="进程")
     add_capacity_fields(add, value, be)
+    add_monitoring_fields(add, value, be, combined=True)
     for name, label, default in (
         ("API_LOG_LEVEL", "API 日志等级", "INFO"),
         ("WORKER_LOG_LEVEL", "Worker 日志等级", "WARNING"),
@@ -543,12 +551,14 @@ def configure(store, mode=None):
                 issues.append("请选择网桥网络，不支持 host / none。")
         if value("inbound") == value("outbound"):
             issues.append("双向令牌不能相同。")
-        return issues + capacity_errors(value)
+        return issues + capacity_errors(value) + monitor_errors(value)
 
     def apply():
         for setter in setters:
             setter()
         be.update(capacity_environment(value))
+        be.update(monitor_environment(value, frontend="http://127.0.0.1:" + fe["FRONTEND_PORT"]))
+        fe["EVERUNFOLD_METRICS_NODE_TOKEN"] = be["EVERUNFOLD_METRICS_NODE_TOKEN"]
         for name, index in (("CELERY_BROKER_URL", 1), ("CELERY_RESULT_BACKEND_URL", 2)):
             if not be[name]:
                 be[name] = urlsplit(be["REDIS_URL"])._replace(path=f"/{index}").geturl()
@@ -566,6 +576,14 @@ def configure(store, mode=None):
                     )
         apply()
         store.save()
+        target = store.var / "monitoring/loki-access.conf"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(
+            mode="w", dir=target.parent, encoding="utf-8", delete=False
+        ) as file:
+            file.write(loki_proxy_include(be))
+            temporary = Path(file.name)
+        temporary.replace(target)
 
     def import_existing():
         found = []

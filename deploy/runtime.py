@@ -97,13 +97,18 @@ def trigger_sync(layout):
 def commands(layout):
     env = environment(layout, "backend")
     python = layout["python"]
+    api_entrypoint = (
+        "app.entrypoints.serve_api"
+        if (Path(layout["backend_root"]) / "app/entrypoints/serve_api.py").is_file()
+        else "uvicorn"
+    )
     return {
         "api": (
             "backend",
             [
                 python,
                 "-m",
-                "uvicorn",
+                api_entrypoint,
                 "app.entrypoints.api:app",
                 "--host",
                 env.get("API_HOST", "0.0.0.0"),

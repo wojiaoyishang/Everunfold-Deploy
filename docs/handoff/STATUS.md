@@ -2,6 +2,12 @@
 
 更新时间：2026-11-17。
 
+## 统一指标和日志接入
+
+- 向导在「监控」分组启用单一后端采集目标，自动配对前端指标令牌，并分别生成 Loki 查询和 Alloy 写入 IP/CIDR 限制。
+- monitoring 提供 Loki、Docker 或 journal Alloy、Celery exporter 配置和 [接入说明](../../monitoring/README.md)。日志保留原文消息并可转换为终端可读格式。
+- 两种 Alloy 配置通过官方 CLI 校验。本机真实 Alloy 和 Nginx 通过 Loki 协议测试端验证日志发送、写入与查询来源隔离及鉴权。整套 Docker/Loki 部署留待目标服务器联调。
+
 ## Celery 自动伸缩
 
 - Docker 和原生向导以列表选择 Celery 执行池和并发策略。现有部署仍为固定并发，启用自动模式时保存 `backend.environment.WORKER_AUTOSCALE`，顺序为最大、最小。Docker 旧镜像在停止现有服务前提示完整构建；之后调整范围可直接启动已构建版本。

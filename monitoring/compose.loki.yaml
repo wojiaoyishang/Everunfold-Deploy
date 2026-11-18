@@ -1,0 +1,11 @@
+services:
+  loki:
+    image: grafana/loki:3.7.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/everunfold.yaml"]
+    ports: ["127.0.0.1:3100:3100"]
+    volumes:
+      - ./loki.yaml:/etc/loki/everunfold.yaml:ro
+      - loki-data:/loki
+volumes:
+  loki-data:

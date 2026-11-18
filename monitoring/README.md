@@ -55,6 +55,16 @@ Docker 采集用本机 Docker socket，并通过 Everunfold 容器标签筛选�
 
 只查应用同步时可用 {app="everunfold",component="nodejs"} | json | event="sync"。容器日志也可以管道传给 python deploy/log_view.py，便于在终端查看。日志索引只加 app、env、component 这类低基数字段，错误码和任务相关信息留在正文。
 
+### 请求来源
+
+在后台进入「设置 → 真实 IP 来源配置」，选择首选来源和回退策略，填写 Node.js、FastAPI 两端反向代理实际使用的直连 IP 或 CIDR。初始规则以直连地址为准。使用代理请求头时，代理应覆盖单值头，并正常追加代理链。「检测当前连接」分别显示两端收到的地址、请求头、选择结果和生效版本。前端节点要先配对并启用才能获取规则和参与诊断。
+
+访问日志 `event="http_access"` 中，`peer_ip` 是服务器看到的直连地址，`client_ip` 和 `client_ip_source` 表示规则采用的地址和来源。`x_real_ip`、`x_forwarded_for`、`forwarded`（仅 `for`）、`cf_connecting_ip`、`true_client_ip` 保存收到的有效地址值或无效标记，`x_forwarded_proto` 记录有效的 HTTP/HTTPS 协议值。IP 字段保留在日志正文里，供查询时解析。服务间同步、Prometheus 与 Loki 的访问白名单继续按各自的直连地址验证。
+
+~~~logql
+{app="everunfold"} | json | event="http_access" | client_ip="203.0.113.42"
+~~~
+
 ## 后端插件指标
 
 后端类插件可选实现异步 metrics(context)，返回至多 50 个 app.core.monitor_metrics.PluginMetric。支持 gauge、counter 和声明式键值标签。名称自动放在 everunfold_plugin_<插件 ID>_ 命名空间内。仅已部署且启用的插件会进入后台采集，各插件超时或出错会单独跳过。证书指标可由反代或以后接入的提供方负责。

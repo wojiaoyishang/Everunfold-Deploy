@@ -8,6 +8,8 @@ services:
       LOKI_USER: ${LOKI_USER:-}
       LOKI_PASSWORD: ${LOKI_PASSWORD:-}
       EVERUNFOLD_ENVIRONMENT: ${EVERUNFOLD_ENVIRONMENT:-production}
+      EVERUNFOLD_LOG_NODE: ${EVERUNFOLD_LOG_NODE:-}
+      EVERUNFOLD_LOG_CONTAINER_MATCH: ${EVERUNFOLD_LOG_CONTAINER_MATCH:-}
     volumes:
       - ./alloy-docker.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

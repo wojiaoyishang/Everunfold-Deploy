@@ -2,29 +2,9 @@
 
 import re
 import secrets
-from ipaddress import ip_network
 from urllib.parse import urlsplit
 
-METRICS = "EVERUNFOLD_METRICS_"
-LOKI = "EVERUNFOLD_LOKI_"
-LOCAL = "127.0.0.1,::1"
-
-
-def networks(value, *, optional=False):
-    if "%" in value:
-        raise ValueError("IP/CIDR 不接受网卡作用域。")
-    items = [ip_network(item.strip(), strict=False) for item in value.split(",") if item.strip()]
-    if (not items and not optional) or any(item.prefixlen == 0 for item in items):
-        raise ValueError("请填写有效的受限 IP/CIDR 列表。")
-    return list(dict.fromkeys(str(item) for item in items))
-
-
-def valid_peers(value, optional=False):
-    try:
-        networks(value, optional=optional)
-        return True
-    except ValueError:
-        return False
+from monitoring_access import LOCAL, METRICS, add_loki_fields, add_peer_field, loki_environment
 
 
 def valid_url(value):
@@ -45,7 +25,7 @@ def valid_url(value):
         return False
 
 
-def add_monitoring_fields(add, value, env, *, combined=False):
+def add_monitoring_fields(add, value, env, *, lookup, combined=False):
     add(
         "metrics_enabled",
         "Prometheus 指标",
@@ -53,14 +33,19 @@ def add_monitoring_fields(add, value, env, *, combined=False):
         choices=(("0", "关闭"), ("1", "启用")),
         group="监控",
     )
-    group = {"group": "监控", "active": lambda: value("metrics_enabled") == "1"}
-    add(
+
+    def enabled():
+        return value("metrics_enabled") == "1"
+
+    group = {"group": "监控", "active": enabled}
+    add_peer_field(
+        add,
         "metrics_peers",
         "指标拉取来源 IP/CIDR",
         env.get(METRICS + "ALLOWED_PEERS", LOCAL),
-        valid=valid_peers,
-        hint="填写后端实际直连来源，多个用逗号分隔。",
-        **group,
+        lookup=lookup,
+        hint="填写后端实际直连来源，多个用逗号分隔。仍须采集令牌。",
+        active=enabled,
     )
     for key, label, name in (
         ("metrics_token", "Prometheus 采集令牌", "TOKEN"),
@@ -92,15 +77,7 @@ def add_monitoring_fields(add, value, env, *, combined=False):
         hint="可留空。仍采集 Broker 队列深度和 Scheduler 指标。",
         **group,
     )
-    for action, label in (("query", "Loki 查询来源 IP/CIDR"), ("push", "Alloy 写入来源 IP/CIDR")):
-        add(
-            "loki_" + action,
-            label,
-            env.get(LOKI + action.upper() + "_ALLOWED_PEERS", LOCAL),
-            valid=lambda text: valid_peers(text, optional=True),
-            group="监控",
-            hint="填写 Loki 反代的直连来源。多个用逗号分隔，留空拒绝全部。",
-        )
+    add_loki_fields(add, env, lookup)
 
 
 def monitor_errors(value):
@@ -119,33 +96,5 @@ def monitor_environment(value, *, frontend=None):
             (frontend if frontend is not None else value("metrics_frontend")) if enabled else ""
         ),
         METRICS + "CELERY_URL": value("metrics_celery") if enabled else "",
-        LOKI + "QUERY_ALLOWED_PEERS": value("loki_query"),
-        LOKI + "PUSH_ALLOWED_PEERS": value("loki_push"),
+        **loki_environment(value),
     }
-
-
-def loki_proxy_include(env):
-    def access(action):
-        addresses = networks(env.get(LOKI + action + "_ALLOWED_PEERS", LOCAL), optional=True)
-        return (
-            "    satisfy all;\n"
-            + "".join(f"    allow {address};\n" for address in addresses)
-            + "    deny all;\n"
-        )
-
-    return (
-        "# Include in a dedicated Loki server block. Define upstream everunfold_loki.\n"
-        "location = /loki/api/v1/push {\n"
-        + access("PUSH")
-        + "    limit_except POST { deny all; }\n"
-        "    proxy_pass http://everunfold_loki;\n"
-        "}\n"
-        "location ~ ^/(?:ready|loki/api/v1/(?:query|query_range|labels|series|"
-        "label/[^/]+/values|index/(?:stats|volume|volume_range)|status/buildinfo|"
-        "detected_fields|detected_labels|patterns))$ {\n"
-        + access("QUERY")
-        + "    limit_except GET POST { deny all; }\n"
-        "    proxy_pass http://everunfold_loki;\n"
-        "}\n"
-        "location / { return 404; }\n"
-    )

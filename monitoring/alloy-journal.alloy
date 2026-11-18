@@ -20,6 +20,7 @@ loki.process "everunfold" {
     values = {
       app = "everunfold",
       env = sys.env("EVERUNFOLD_ENVIRONMENT"),
+      node = sys.env("EVERUNFOLD_LOG_NODE"),
     }
   }
 }

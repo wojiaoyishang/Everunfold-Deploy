@@ -139,8 +139,13 @@ def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
     edits = {
         "metrics_enabled": "1",
         "metrics_peers": "192.0.2.5",
+        "frontend_metrics_enabled": "1",
+        "frontend_metrics_peers": "192.0.2.0/24",
+        "frontend_direct_peers": "198.51.100.0/24",
         "loki_query": "192.0.2.8",
         "loki_push": "198.51.100.0/24",
+        "frontend_loki_query": "203.0.113.0/24",
+        "frontend_loki_push": "",
     }
     for key, value in edits.items():
         form.edit(next(item for item in form.fields if item.key == key), value)
@@ -150,12 +155,45 @@ def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
     frontend = doc["frontend"]["environment"]
     assert backend["EVERUNFOLD_METRICS_TOKEN"] != backend["EVERUNFOLD_METRICS_NODE_TOKEN"]
     assert backend["EVERUNFOLD_METRICS_NODE_TOKEN"] == frontend["EVERUNFOLD_METRICS_NODE_TOKEN"]
+    assert frontend["EVERUNFOLD_FRONTEND_METRICS_TOKEN"] not in (
+        backend["EVERUNFOLD_METRICS_TOKEN"],
+        backend["EVERUNFOLD_METRICS_NODE_TOKEN"],
+        "",
+    )
+    assert frontend["EVERUNFOLD_FRONTEND_METRICS_ALLOWED_PEERS"] == "198.51.100.0/24"
+    assert frontend["EVERUNFOLD_METRICS_NODE_ALLOWED_PEERS"] == "127.0.0.1/32,::1/128,192.0.2.0/24"
     assert backend["EVERUNFOLD_METRICS_FRONTEND_URL"] == "http://127.0.0.1:3000"
     policy = (store.var / "monitoring/loki-access.conf").read_text()
     push, query = policy.split("location ~", 1)
     assert "198.51.100.0/24" in push and "198.51.100.0/24" not in query
     assert "192.0.2.8/32" in query and "192.0.2.8/32" not in push
     assert "deny all;" in push and "deny all;" in query
+    frontend_policy = (store.var / "monitoring/frontend-loki-access.conf").read_text()
+    assert "allow 203.0.113.0/24;" in frontend_policy
+    assert "198.51.100.0/24" not in frontend_policy
+
+
+def test_docker_monitoring_network_resolves_only_attached_subnets(configured, monkeypatch):
+    from types import SimpleNamespace
+
+    store = configured("docker")
+    form = configure(store)
+    fields = {item.key: item for item in form.fields}
+    form.edit(fields["extra_networks"], "1panel-network")
+    form.edit(fields["frontend_metrics_enabled"], "1")
+    seen = []
+
+    def inspect(arguments, **_):
+        assert arguments[:3] == ["docker", "network", "inspect"]
+        seen.append(arguments[-1])
+        return SimpleNamespace(stdout="172.21.0.0/16,fd01::/64,\n")
+
+    monkeypatch.setattr("configure.subprocess.run", inspect)
+    form.edit(fields["frontend_direct_peers"], "1panel-network,192.0.2.8")
+    assert fields["frontend_direct_peers"].value == "172.21.0.0/16,fd01::/64,192.0.2.8/32"
+    assert seen == ["1panel-network"]
+    with pytest.raises(ValueError, match="加入主网络"):
+        form.edit(fields["frontend_direct_peers"], "unrelated-network")
 
 
 def test_environment_isolation_and_worker_overrides(configured, monkeypatch):

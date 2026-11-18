@@ -4,7 +4,7 @@
 
 ## 统一指标和日志接入
 
-- 向导在「监控」分组启用单一后端采集目标，自动配对前端指标令牌，并分别生成 Loki 查询和 Alloy 写入 IP/CIDR 限制。
+- 向导在「监控」分组配置后端聚合和前端独立采集目标。统一部署保留内部回环采集，前端独立令牌和来源范围分别保存。后端和前端可各生成 Loki 查询和 Alloy 写入限制。Docker 向导将已连接的网络名换算为实际 IPv4/IPv6 CIDR。
 - monitoring 提供 Loki、Docker 或 journal Alloy、Celery exporter 配置和 [接入说明](../../monitoring/README.md)。日志保留原文消息并可转换为终端可读格式。
 - 两种 Alloy 配置通过官方 CLI 校验。本机真实 Alloy 和 Nginx 通过 Loki 协议测试端验证日志发送、写入与查询来源隔离及鉴权。整套 Docker/Loki 部署留待目标服务器联调。
 

@@ -1,11 +1,11 @@
 # Everunfold 指标和日志接入
 
-监控服务器运行现有 Prometheus 和 Grafana，可再运行 Loki。应用服务器上的 Alloy 读取原有 stdout/stderr，然后发给 Loki。Prometheus 只需增加一个 Everunfold 采集目标。
+监控服务器运行现有 Prometheus 和 Grafana，可再运行 Loki。应用服务器上的 Alloy 读取原有 stdout/stderr，然后发给 Loki。可使用现有的后端聚合目标，也可增加前端独立目标。
 
 ## 指标
 
 1. 更新后端、前端与统一部署源码。在后端独立或统一 setup 的「监控」中启用 Prometheus 指标。填写后端实际直连的监控来源 IP/CIDR，并复制采集令牌到 Prometheus 主机的私有文件。让 `/metrics` 仅在监控网或带 TLS 的私有反代上可达。经反代访问时，白名单识别后端看到的直接来源，反代也应限制真实采集来源。
-2. 统一部署会自动填写回环前端地址和双方共享的节点指标令牌。分开部署时，在后端向导填写私有前端地址，再在前端 `config.yaml` 的 `environment` 配置相同的 `EVERUNFOLD_METRICS_NODE_TOKEN`。前端内部指标沿用接收器的来源 IP 白名单。后端的采集令牌与节点令牌不同。
+2. 统一部署会自动填写回环前端地址和双方共享的节点指标令牌。分开部署时，在后端向导填写私有前端地址，再在前端向导填写相同的「前端内部指标令牌」。可单独填写前端内部指标的来源 IP/CIDR，单端前端留空时沿用接收器的来源白名单。统一部署保留回环来源。
 3. 保存后首次选择「构建并启动」。应用新的 Python/Node 依赖需要构建一次。
 4. 在 Prometheus 增加如下配置。targets 填写 Prometheus 容器能访问的地址，令牌文件由 Prometheus 进程读取。
 
@@ -23,6 +23,28 @@ scrape_configs:
 
 面板可使用 everunfold_api_http_requests_total、everunfold_node_http_requests_total 及各自延迟直方图、everunfold_scheduler_up、everunfold_scheduler_healthy、everunfold_scheduler_last_successful_scan_timestamp_seconds、everunfold_scheduler_oldest_due_timestamp_seconds、everunfold_celery_broker_queued_messages、everunfold_celery_workers_online、everunfold_sync_revision_gap 和 everunfold_sync_failed。采集状态用 everunfold_metrics_source_up。若某来源不可用，同一响应仍可读取其他来源和 FastAPI 本机指标。带时间戳的指标用 time() 减去时间戳计算时长。
 
+### 前端独立采集
+
+在每个前端的 setup 启用「前端独立 Prometheus 指标」，为该节点配置独立令牌与来源 IP/CIDR。使用统一向导时在同一个「监控」分组配置。首次升级重新编译并启动前端。之后 Prometheus 直接访问前端 `/metrics`，利用同一份 Node.js worker 指标，无需联系 FastAPI。后端聚合的配置和接口保持原样。
+
+每个前端创建自己的采集任务和令牌文件。面板可以按 `job` 或 `node` 区分前端，统计同一前端时选用一个采集来源。
+
+~~~yaml
+scrape_configs:
+  - job_name: everunfold-frontend-a
+    scheme: https
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/frontend-a.token
+    static_configs:
+      - targets: ["frontend-a-monitor.example.internal:443"]
+        labels:
+          node: frontend-a
+~~~
+
+指标和日志白名单可填 IPv4、IPv6 或 CIDR，多个用逗号分隔。Docker 向导也接受已连接的网络名，例如 `1panel-network`，并保存由 Docker 查得的当前网段。网段改变后重新填写网络名。如果 Loki 在另一台主机，填写 Loki 反代实际看到的来源网段。[Docker 网络检查](https://docs.docker.com/reference/cli/docker/network/inspect/) · [Nginx 地址访问规则](https://nginx.org/en/docs/http/ngx_http_access_module.html)
+
 ## Celery Exporter（可选）
 
 任务成功/失败、运行耗时和实际子进程数使用独立的 Celery exporter。它应在应用和 Redis Broker 均可达的 Docker 网络上运行，9808 不发布到宿主。
@@ -37,7 +59,7 @@ docker compose -f compose.collectors.yaml --profile celery up -d celery-exporter
 ## Loki 日志和来源限制
 
 1. 在监控服务器进入 monitoring，运行 docker compose -f compose.loki.yaml up -d。Loki 使用独立数据卷，模板默认保留 14 天，端口只绑定宿主回环。
-2. 在「监控」分组分别填写「Loki 查询来源 IP/CIDR」（Grafana 的实际来源）和「Alloy 写入来源 IP/CIDR」（应用主机的实际来源）。保存会在配置目录下生成 var/monitoring/loki-access.conf。留空会拒绝该方向所有请求。
+2. 在每个节点的「监控」分组填写「Loki 查询来源 IP/CIDR」（Grafana 的实际来源）和「Alloy 写入来源 IP/CIDR」（应用主机的实际来源）。单端向导保存到各自配置目录下的 `var/monitoring/loki-access.conf`。统一向导另外生成 `var/monitoring/frontend-loki-access.conf` 供前端专用反代使用，原有路径继续可用。留空会拒绝该方向所有请求。
 3. 把生成的文件装到监控服务器的 Nginx/OpenResty。为 Loki 使用独立站点，绑定监控网并配置 HTTPS。在 http 上下文声明 upstream everunfold_loki { server 127.0.0.1:3100; }，在该站点 server 块 include 生成的文件，并配置 auth_basic 与只读凭据文件。若反代也在 Docker 中，upstream 填它实际可达的 Loki 私有地址。改白名单后重新应用 include 并重载反代。查询与写入规则匹配直连来源，Loki 的删除和配置等管理路由不在允许列表。
 4. 在应用服务器的 monitoring/.env 设置 LOKI_PUSH_URL 为私有 HTTPS 地址加 /loki/api/v1/push，LOKI_USER、LOKI_PASSWORD 为反代写入凭据，以及 EVERUNFOLD_ENVIRONMENT。启动 Alloy。
 
@@ -46,6 +68,8 @@ docker compose -f compose.collectors.yaml up -d alloy
 ~~~
 
 Docker 采集用本机 Docker socket，并通过 Everunfold 容器标签筛选运行日志。Alloy 的数据卷保留读取位置。原生部署使用 alloy-journal.alloy，设置 EVERUNFOLD_SYSTEMD_UNIT 为实际用户服务名，并给 Alloy 读取该 journal 的权限。Grafana 的 Loki 数据源填写反代根地址和查询凭据。
+
+多个前端可各自在所在主机启动 Alloy，并设置 `EVERUNFOLD_LOG_NODE` 区分日志。例如用 `{app="everunfold",node="frontend-a"}` 查询。Docker 同一主机上分开采集时，为每个 Alloy 设置不同的 Compose 项目名和 `EVERUNFOLD_LOG_CONTAINER_MATCH`，例如 `/everunfold-frontend-a`（容器名正则）。每个 Alloy 可指向各自的 Loki 入口，要求日志数据也相互隔离时使用独立 Loki 或启用了租户隔离的 Loki。Alloy 直接采集应用日志，在 FastAPI 停机时仍可运行。[Alloy Docker 容器发现](https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.docker/)
 
 四个应用组件的日志归为一行 JSON，保留 time、level、component、event、message 及事件字段。Grafana Explore 可以用下面的表达式显示便于阅读的行。未带 JSON 字段的工具/框架日志也会保留原文。
 

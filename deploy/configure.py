@@ -6,6 +6,7 @@ import ipaddress
 import os
 import re
 import secrets
+import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import urlsplit
@@ -22,9 +23,23 @@ from config_validation import (
     token,
     valid_port,
 )
+from frontend_monitoring import (
+    add_direct_metrics_fields,
+    direct_metrics_environment,
+    direct_metrics_errors,
+)
+from monitoring_access import (
+    LOCAL,
+    METRICS,
+    NODE_PEERS,
+    add_loki_fields,
+    add_peer_field,
+    loki_environment,
+    loki_proxy_include,
+    networks,
+)
 from monitoring_setup import (
     add_monitoring_fields,
-    loki_proxy_include,
     monitor_environment,
     monitor_errors,
 )
@@ -145,6 +160,34 @@ def configure(store, mode=None):
 
     def docker_active():
         return value("mode") == "docker"
+
+    def docker_subnets(name):
+        if not docker_active():
+            raise ValueError("直接部署请填写实际来源 IP/CIDR。")
+        attached = {
+            value("network"),
+            *(part.strip() for part in value("extra_networks").split(",")),
+        }
+        if name not in attached:
+            raise ValueError(f"请先把 Docker 网络 {name} 加入主网络或额外网络。")
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "network",
+                    "inspect",
+                    "--format",
+                    "{{range .IPAM.Config}}{{if .Subnet}}{{.Subnet}},{{end}}{{end}}",
+                    name,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise ValueError(f"无法读取 Docker 网络 {name} 的子网。") from None
+        return result.stdout.strip()
 
     for key, label in (("container", "容器名称"), ("network", "主网络")):
         dep(
@@ -497,7 +540,19 @@ def configure(store, mode=None):
         )
     bind(be, "API_WORKERS", "workers", "API worker 数", "1", valid=positive, group="进程")
     add_capacity_fields(add, value, be)
-    add_monitoring_fields(add, value, be, combined=True)
+    add_monitoring_fields(add, value, be, combined=True, lookup=docker_subnets)
+    add_direct_metrics_fields(add, value, fe, docker_subnets)
+    add_loki_fields(add, fe, docker_subnets, prefix="frontend_", title="前端 ")
+    add_peer_field(
+        add,
+        "frontend_metrics_peers",
+        "前端内部指标来源 IP/CIDR",
+        fe.get(NODE_PEERS, LOCAL),
+        lookup=docker_subnets,
+        optional=True,
+        active=lambda: value("metrics_enabled") == "1",
+        hint="统一容器内的后端采集保留回环来源。仅在需要时填写额外采集网段。",
+    )
     for name, label, default in (
         ("API_LOG_LEVEL", "API 日志等级", "INFO"),
         ("WORKER_LOG_LEVEL", "Worker 日志等级", "WARNING"),
@@ -551,14 +606,22 @@ def configure(store, mode=None):
                 issues.append("请选择网桥网络，不支持 host / none。")
         if value("inbound") == value("outbound"):
             issues.append("双向令牌不能相同。")
-        return issues + capacity_errors(value) + monitor_errors(value)
+        return (
+            issues
+            + capacity_errors(value)
+            + monitor_errors(value)
+            + direct_metrics_errors(value, value("metrics_token"), value("metrics_node_token"))
+        )
 
     def apply():
         for setter in setters:
             setter()
         be.update(capacity_environment(value))
         be.update(monitor_environment(value, frontend="http://127.0.0.1:" + fe["FRONTEND_PORT"]))
-        fe["EVERUNFOLD_METRICS_NODE_TOKEN"] = be["EVERUNFOLD_METRICS_NODE_TOKEN"]
+        fe[METRICS + "NODE_TOKEN"] = be[METRICS + "NODE_TOKEN"]
+        fe[NODE_PEERS] = ",".join(networks(f"{LOCAL},{value('frontend_metrics_peers')}"))
+        fe.update(direct_metrics_environment(value))
+        fe.update(loki_environment(value, prefix="frontend_"))
         for name, index in (("CELERY_BROKER_URL", 1), ("CELERY_RESULT_BACKEND_URL", 2)):
             if not be[name]:
                 be[name] = urlsplit(be["REDIS_URL"])._replace(path=f"/{index}").geturl()
@@ -576,14 +639,15 @@ def configure(store, mode=None):
                     )
         apply()
         store.save()
-        target = store.var / "monitoring/loki-access.conf"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile(
-            mode="w", dir=target.parent, encoding="utf-8", delete=False
-        ) as file:
-            file.write(loki_proxy_include(be))
-            temporary = Path(file.name)
-        temporary.replace(target)
+        for filename, env in (("loki-access.conf", be), ("frontend-loki-access.conf", fe)):
+            target = store.var / "monitoring" / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with NamedTemporaryFile(
+                mode="w", dir=target.parent, encoding="utf-8", delete=False
+            ) as file:
+                file.write(loki_proxy_include(env))
+                temporary = Path(file.name)
+            temporary.replace(target)
 
     def import_existing():
         found = []

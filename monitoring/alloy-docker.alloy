@@ -12,6 +12,16 @@ discovery.relabel "everunfold" {
     ]
     regex = ".+;.*|.*;(backend|frontend)"
   }
+  rule {
+    action = "keep"
+    source_labels = ["__meta_docker_container_name"]
+    regex = coalesce(sys.env("EVERUNFOLD_LOG_CONTAINER_MATCH"), ".*")
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex = "/?(.+)"
+    target_label = "container"
+  }
 }
 
 loki.source.docker "everunfold" {
@@ -37,6 +47,7 @@ loki.process "everunfold" {
     values = {
       app = "everunfold",
       env = sys.env("EVERUNFOLD_ENVIRONMENT"),
+      node = sys.env("EVERUNFOLD_LOG_NODE"),
     }
   }
 }

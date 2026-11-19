@@ -7,7 +7,7 @@
 
 `config.yaml` 的 `deployment` 管路径和启动方式，`backend`、`frontend` 分别保留原部署 YAML 的完整结构。
 不将统一 YAML 直接交给应用。运行目录下生成两个兼容文档，每个子进程明确指定自己的 `CONFIG_FILE` 和数据路径。
-前端 YAML 环境不注入 Node 的全局环境，防止阻碍浏览器配置热读取和复现 ESM/CommonJS 令牌丢失问题。
+前端启动入口将 `EVERUNFOLD_LOG_FORMAT` 传入 Node 进程环境，供启动器和各 worker 共用。浏览器可编辑的设置和凭据继续由 YAML 加载器读取。
 
 `var/runtime/baseline.yaml` 保存上次与统一配置同步的运行文档。每次打开/保存执行三方合并，接纳浏览器修改；同字段并发修改报冲突。
 所有含凭据的文档使用同目录临时文件、0600 权限和原子替换。保存有配置锁，运行文档写入遵循前端 `config.yaml.switch.lock` 协议。

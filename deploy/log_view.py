@@ -1,4 +1,4 @@
-"""Display structured runtime logs without changing what Alloy collects."""
+"""Display structured runtime logs as readable terminal output."""
 
 import json
 import sys

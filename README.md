@@ -1,10 +1,11 @@
 # Everunfold Deploy
 
-[接入 Prometheus、Grafana 和 Loki](monitoring/README.md)。
+[指标与日志接入](monitoring/README.md)。
 
 一个配置向导，部署 Everunfold 前端、API、Celery Worker 和 Scheduler。
 Docker 模式只保留 **一个常驻应用容器**，PostgreSQL 和 Redis 使用外部服务。
 前后端源码仓库仍分别维护，本仓库负责配置、拉取、构建、配对和启动。
+「日志 → 结构化日志」默认开启，应用按行输出 JSON，供外部日志系统采集。
 
 在仓库根目录运行：
 

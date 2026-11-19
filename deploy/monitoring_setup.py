@@ -1,10 +1,10 @@
-"""Shared monitoring fields and a private Loki proxy include."""
+"""Shared Prometheus monitoring fields."""
 
 import re
 import secrets
 from urllib.parse import urlsplit
 
-from monitoring_access import LOCAL, METRICS, add_loki_fields, add_peer_field, loki_environment
+from monitoring_access import LOCAL, METRICS, add_peer_field
 
 
 def valid_url(value):
@@ -77,7 +77,6 @@ def add_monitoring_fields(add, value, env, *, lookup, combined=False):
         hint="可留空。仍采集 Broker 队列深度和 Scheduler 指标。",
         **group,
     )
-    add_loki_fields(add, env, lookup)
 
 
 def monitor_errors(value):
@@ -96,5 +95,4 @@ def monitor_environment(value, *, frontend=None):
             (frontend if frontend is not None else value("metrics_frontend")) if enabled else ""
         ),
         METRICS + "CELERY_URL": value("metrics_celery") if enabled else "",
-        **loki_environment(value),
     }

@@ -1,6 +1,6 @@
 # Everunfold 指标和日志接入
 
-监控服务器运行现有 Prometheus 和 Grafana，可再运行 Loki。应用服务器上的 Alloy 读取原有 stdout/stderr，然后发给 Loki。可使用现有的后端聚合目标，也可增加前端独立目标。
+Prometheus 可从后端聚合目标和前端独立目标拉取指标。应用将日志输出到 stdout/stderr，外部采集器可从 Docker 容器或 systemd journal 读取。
 
 ## 指标
 
@@ -43,7 +43,7 @@ scrape_configs:
           node: frontend-a
 ~~~
 
-指标和日志白名单可填 IPv4、IPv6 或 CIDR，多个用逗号分隔。Docker 向导也接受已连接的网络名，例如 `1panel-network`，并保存由 Docker 查得的当前网段。网段改变后重新填写网络名。如果 Loki 在另一台主机，填写 Loki 反代实际看到的来源网段。[Docker 网络检查](https://docs.docker.com/reference/cli/docker/network/inspect/) · [Nginx 地址访问规则](https://nginx.org/en/docs/http/ngx_http_access_module.html)
+指标白名单可填 IPv4、IPv6 或 CIDR，多个用逗号分隔。Docker 向导也接受已连接的网络名，例如 `1panel-network`，并保存由 Docker 查得的当前网段。网段改变后重新填写网络名。[Docker 网络检查](https://docs.docker.com/reference/cli/docker/network/inspect/) · [Nginx 地址访问规则](https://nginx.org/en/docs/http/ngx_http_access_module.html)
 
 ## Celery Exporter（可选）
 
@@ -56,36 +56,25 @@ docker compose -f compose.collectors.yaml --profile celery up -d celery-exporter
 
 复制 `.env.example` 为 `monitoring/.env`。填写 `CE_BROKER_URL`（与后端的 `CELERY_BROKER_URL` 一致）、`CELERY_KEY_PREFIX`（项目 Redis 前缀加 `celery:`）、`CELERY_QUEUE_NAME`（项目 Redis 前缀加 `settings`）和可选的 `EVERUNFOLD_MONITOR_NETWORK`。例如前缀是 `everunfold:` 时，填写 `everunfold:celery:` 和 `everunfold:settings`。在部署向导填 `http://celery-exporter:9808`。后端启用 Celery 任务事件，每约 30 秒后台读取 exporter。Broker 的完整积压使用应用自己的指标，包含 Redis 的全部优先级队列。
 
-## Loki 日志和来源限制
+## 应用日志
 
-1. 在监控服务器进入 monitoring，运行 docker compose -f compose.loki.yaml up -d。Loki 使用独立数据卷，模板默认保留 14 天，端口只绑定宿主回环。
-2. 在每个节点的「监控」分组填写「Loki 查询来源 IP/CIDR」（Grafana 的实际来源）和「Alloy 写入来源 IP/CIDR」（应用主机的实际来源）。单端向导保存到各自配置目录下的 `var/monitoring/loki-access.conf`。统一向导另外生成 `var/monitoring/frontend-loki-access.conf` 供前端专用反代使用，原有路径继续可用。留空会拒绝该方向所有请求。
-3. 把生成的文件装到监控服务器的 Nginx/OpenResty。为 Loki 使用独立站点，绑定监控网并配置 HTTPS。在 http 上下文声明 upstream everunfold_loki { server 127.0.0.1:3100; }，在该站点 server 块 include 生成的文件，并配置 auth_basic 与只读凭据文件。若反代也在 Docker 中，upstream 填它实际可达的 Loki 私有地址。改白名单后重新应用 include 并重载反代。查询与写入规则匹配直连来源，Loki 的删除和配置等管理路由不在允许列表。
-4. 在应用服务器的 monitoring/.env 设置 LOKI_PUSH_URL 为私有 HTTPS 地址加 /loki/api/v1/push，LOKI_USER、LOKI_PASSWORD 为反代写入凭据，以及 EVERUNFOLD_ENVIRONMENT。启动 Alloy。
+统一部署和前后端独立部署的「日志」分组都提供「结构化日志」。默认开启，应用每行输出一个 JSON 对象，包含 `time`、`level`、`component`、`event`、`message` 和对应事件的字段。选择「关闭（纯文本）」后，同一批应用事件以可读文本输出。配置保存在 `environment.EVERUNFOLD_LOG_FORMAT`，值为 `json` 或 `text`。已有部署首次使用此选项时先用新版前后端源码构建，之后保存并重启即可切换。
 
-~~~bash
-docker compose -f compose.collectors.yaml up -d alloy
-~~~
+外部 Alloy 可读取 Docker 日志或原生部署的 systemd journal，并写入外部 Loki。统一容器内可按 `component` 区分 `nodejs`、`fastapi`、`celery` 和 `scheduler`。采集端可用 `org.everunfold.deployment` 容器标签发现统一部署，用实际的 unit 名筛选 journal。
 
-Docker 采集用本机 Docker socket，并通过 Everunfold 容器标签筛选运行日志。Alloy 的数据卷保留读取位置。原生部署使用 alloy-journal.alloy，设置 EVERUNFOLD_SYSTEMD_UNIT 为实际用户服务名，并给 Alloy 读取该 journal 的权限。Grafana 的 Loki 数据源填写反代根地址和查询凭据。
-
-多个前端可各自在所在主机启动 Alloy，并设置 `EVERUNFOLD_LOG_NODE` 区分日志。例如用 `{app="everunfold",node="frontend-a"}` 查询。Docker 同一主机上分开采集时，为每个 Alloy 设置不同的 Compose 项目名和 `EVERUNFOLD_LOG_CONTAINER_MATCH`，例如 `/everunfold-frontend-a`（容器名正则）。每个 Alloy 可指向各自的 Loki 入口，要求日志数据也相互隔离时使用独立 Loki 或启用了租户隔离的 Loki。Alloy 直接采集应用日志，在 FastAPI 停机时仍可运行。[Alloy Docker 容器发现](https://grafana.com/docs/alloy/latest/reference/components/discovery/discovery.docker/)
-
-统一容器内的前后端也可分流。前端专用 Alloy 设置 `EVERUNFOLD_LOG_COMPONENT_MATCH=nodejs`，后端专用 Alloy 可设置 `fastapi|celery|scheduler`。留空采集全部组件，容器名过滤和组件过滤可以同时启用。[Alloy 日志过滤](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.process/#stagematch)
-
-四个应用组件的日志归为一行 JSON，保留 time、level、component、event、message 及事件字段。Grafana Explore 可以用下面的表达式显示便于阅读的行。未带 JSON 字段的工具/框架日志也会保留原文。
+如果采集端为日志设置了 `app="everunfold"`，可在 Grafana Explore 中查询：
 
 ~~~logql
-{app="everunfold"} | json | line_format "{{if .message}}{{.time}} · {{.level}} · {{.component}} · {{.message}}{{else}}{{ __line__ }}{{end}}"
+{app="everunfold"} | json | component="nodejs" | event="sync"
 ~~~
 
-只查应用同步时可用 {app="everunfold",component="nodejs"} | json | event="sync"。容器日志也可以管道传给 python deploy/log_view.py，便于在终端查看。日志索引只加 app、env、component 这类低基数字段，错误码和任务相关信息留在正文。
+查看本地日志时也可将输出传给 `python deploy/log_view.py`，它会把 JSON 转成易读的行并保留普通文本。
 
 ### 请求来源
 
 在后台进入「设置 → 真实 IP 来源配置」，选择首选来源和回退策略，填写 Node.js、FastAPI 两端反向代理实际使用的直连 IP 或 CIDR。初始规则以直连地址为准。使用代理请求头时，代理应覆盖单值头，并正常追加代理链。「检测当前连接」分别显示两端收到的地址、请求头、选择结果和生效版本。前端节点要先配对并启用才能获取规则和参与诊断。
 
-访问日志 `event="http_access"` 中，`peer_ip` 是服务器看到的直连地址，`client_ip` 和 `client_ip_source` 表示规则采用的地址和来源。`x_real_ip`、`x_forwarded_for`、`forwarded`（仅 `for`）、`cf_connecting_ip`、`true_client_ip` 保存收到的有效地址值或无效标记，`x_forwarded_proto` 记录有效的 HTTP/HTTPS 协议值。IP 字段保留在日志正文里，供查询时解析。服务间同步、Prometheus 与 Loki 的访问白名单继续按各自的直连地址验证。
+访问日志 `event="http_access"` 中，`peer_ip` 是服务器看到的直连地址，`client_ip` 和 `client_ip_source` 表示规则采用的地址和来源。`x_real_ip`、`x_forwarded_for`、`forwarded`（仅 `for`）、`cf_connecting_ip`、`true_client_ip` 保存收到的有效地址值或无效标记，`x_forwarded_proto` 记录有效的 HTTP/HTTPS 协议值。IP 字段保留在日志正文里，供查询时解析。服务间同步和 Prometheus 的访问白名单继续按各自的直连地址验证。
 
 ~~~logql
 {app="everunfold"} | json | event="http_access" | client_ip="203.0.113.42"

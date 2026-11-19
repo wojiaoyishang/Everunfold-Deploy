@@ -8,7 +8,6 @@ import re
 import secrets
 import subprocess
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
@@ -32,10 +31,7 @@ from monitoring_access import (
     LOCAL,
     METRICS,
     NODE_PEERS,
-    add_loki_fields,
     add_peer_field,
-    loki_environment,
-    loki_proxy_include,
     networks,
 )
 from monitoring_setup import (
@@ -542,7 +538,6 @@ def configure(store, mode=None):
     add_capacity_fields(add, value, be)
     add_monitoring_fields(add, value, be, combined=True, lookup=docker_subnets)
     add_direct_metrics_fields(add, value, fe, docker_subnets)
-    add_loki_fields(add, fe, docker_subnets, prefix="frontend_", title="前端 ")
     add_peer_field(
         add,
         "frontend_metrics_peers",
@@ -552,6 +547,14 @@ def configure(store, mode=None):
         optional=True,
         active=lambda: value("metrics_enabled") == "1",
         hint="统一容器内的后端采集保留回环来源。仅在需要时填写额外采集网段。",
+    )
+    add(
+        "log_format",
+        "结构化日志",
+        be.get("EVERUNFOLD_LOG_FORMAT", fe.get("EVERUNFOLD_LOG_FORMAT", "json")),
+        choices=(("json", "开启（JSON）"), ("text", "关闭（纯文本）")),
+        group="日志",
+        hint="默认每行输出一个 JSON 对象，便于外部采集。重新启动后生效。",
     )
     for name, label, default in (
         ("API_LOG_LEVEL", "API 日志等级", "INFO"),
@@ -621,7 +624,7 @@ def configure(store, mode=None):
         fe[METRICS + "NODE_TOKEN"] = be[METRICS + "NODE_TOKEN"]
         fe[NODE_PEERS] = ",".join(networks(f"{LOCAL},{value('frontend_metrics_peers')}"))
         fe.update(direct_metrics_environment(value))
-        fe.update(loki_environment(value, prefix="frontend_"))
+        be["EVERUNFOLD_LOG_FORMAT"] = fe["EVERUNFOLD_LOG_FORMAT"] = value("log_format")
         for name, index in (("CELERY_BROKER_URL", 1), ("CELERY_RESULT_BACKEND_URL", 2)):
             if not be[name]:
                 be[name] = urlsplit(be["REDIS_URL"])._replace(path=f"/{index}").geturl()
@@ -639,15 +642,6 @@ def configure(store, mode=None):
                     )
         apply()
         store.save()
-        for filename, env in (("loki-access.conf", be), ("frontend-loki-access.conf", fe)):
-            target = store.var / "monitoring" / filename
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with NamedTemporaryFile(
-                mode="w", dir=target.parent, encoding="utf-8", delete=False
-            ) as file:
-                file.write(loki_proxy_include(env))
-                temporary = Path(file.name)
-            temporary.replace(target)
 
     def import_existing():
         found = []
@@ -717,6 +711,8 @@ def normalize(store):
         app, env = document["application"], document["environment"]
         env["EVERUNFOLD_DATA_DIR"] = data
         env.pop("CONFIG_FILE", None)
+        for name in ("EVERUNFOLD_LOKI_QUERY_ALLOWED_PEERS", "EVERUNFOLD_LOKI_PUSH_ALLOWED_PEERS"):
+            env.pop(name, None)
         if role == "backend":
             app.setdefault("media", {})["uploads_path"] = data + "/uploads"
             env.pop("BACKEND_BASE_URL", None)

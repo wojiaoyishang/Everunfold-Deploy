@@ -133,7 +133,7 @@ def test_missing_master_cannot_regenerate_existing_instance_keys(configured):
         Store(store.path)
 
 
-def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
+def test_monitoring_saves_distinct_credentials(configured):
     store = configured()
     form = configure(store)
     edits = {
@@ -142,10 +142,6 @@ def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
         "frontend_metrics_enabled": "1",
         "frontend_metrics_peers": "192.0.2.0/24",
         "frontend_direct_peers": "198.51.100.0/24",
-        "loki_query": "192.0.2.8",
-        "loki_push": "198.51.100.0/24",
-        "frontend_loki_query": "203.0.113.0/24",
-        "frontend_loki_push": "",
     }
     for key, value in edits.items():
         form.edit(next(item for item in form.fields if item.key == key), value)
@@ -163,14 +159,40 @@ def test_monitoring_saves_distinct_credentials_and_loki_policy(configured):
     assert frontend["EVERUNFOLD_FRONTEND_METRICS_ALLOWED_PEERS"] == "198.51.100.0/24"
     assert frontend["EVERUNFOLD_METRICS_NODE_ALLOWED_PEERS"] == "127.0.0.1/32,::1/128,192.0.2.0/24"
     assert backend["EVERUNFOLD_METRICS_FRONTEND_URL"] == "http://127.0.0.1:3000"
-    policy = (store.var / "monitoring/loki-access.conf").read_text()
-    push, query = policy.split("location ~", 1)
-    assert "198.51.100.0/24" in push and "198.51.100.0/24" not in query
-    assert "192.0.2.8/32" in query and "192.0.2.8/32" not in push
-    assert "deny all;" in push and "deny all;" in query
-    frontend_policy = (store.var / "monitoring/frontend-loki-access.conf").read_text()
-    assert "allow 203.0.113.0/24;" in frontend_policy
-    assert "198.51.100.0/24" not in frontend_policy
+
+
+def test_log_format_is_shared_with_both_processes(configured, monkeypatch):
+    store = configured()
+    variable = "EVERUNFOLD_LOG_FORMAT"
+    monkeypatch.delenv(variable, raising=False)
+    legacy = ("EVERUNFOLD_LOKI_QUERY_ALLOWED_PEERS", "EVERUNFOLD_LOKI_PUSH_ALLOWED_PEERS")
+    for role in ("backend", "frontend"):
+        env = store.doc[role]["environment"]
+        assert env.pop(variable) == "json"
+        env.update(dict.fromkeys(legacy, "192.0.2.8"))
+    store.save()
+    form = configure(Store(store.path))
+    field = next(item for item in form.fields if item.key == "log_format")
+    assert field.value == "json"
+    form.edit(field, "text")
+    form.save()
+    store = Store(store.path)
+    store.render()
+    layout = {role + "_config": str(store.path_for(role)) for role in ("backend", "frontend")}
+    layout.update({role + "_root": str(store.path.parent) for role in ("backend", "frontend")})
+    layout.update(
+        {role + "_data": str(store.path.parent / role) for role in ("backend", "frontend")}
+    )
+    for role in ("backend", "frontend"):
+        env = read(store.path_for(role))["environment"]
+        assert env[variable] == "text"
+        assert not set(legacy).intersection(env)
+    assert environment(layout, "backend")[variable] == "text"
+    assert variable not in environment(layout, "frontend")
+    monkeypatch.setenv(variable, "json")
+    for role in ("backend", "frontend"):
+        assert environment(layout, role)[variable] == "json"
+    assert not (store.var / "monitoring").exists()
 
 
 def test_docker_monitoring_network_resolves_only_attached_subnets(configured, monkeypatch):

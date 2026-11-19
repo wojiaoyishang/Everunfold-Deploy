@@ -58,6 +58,8 @@ docker compose -f compose.collectors.yaml --profile celery up -d celery-exporter
 
 ## 应用日志
 
+完整字段、代码用法和查询示例见 [JSON 日志字段](logging-fields.md)。
+
 统一部署和前后端独立部署的「日志」分组都提供「结构化日志」。默认开启，应用每行输出一个 JSON 对象，包含 `time`、`level`、`component`、`event`、`message` 和对应事件的字段。选择「关闭（纯文本）」后，同一批应用事件以可读文本输出。配置保存在 `environment.EVERUNFOLD_LOG_FORMAT`，值为 `json` 或 `text`。已有部署首次使用此选项时先用新版前后端源码构建，之后保存并重启即可切换。
 
 外部 Alloy 可读取 Docker 日志或原生部署的 systemd journal，并写入外部 Loki。统一容器内可按 `component` 区分 `nodejs`、`fastapi`、`celery` 和 `scheduler`。采集端可用 `org.everunfold.deployment` 容器标签发现统一部署，用实际的 unit 名筛选 journal。

@@ -2,6 +2,13 @@
 
 更新时间为 2026-11-19。
 
+## Grafana 业务事件
+
+- 已更新 [Loki Grafana V2 仪表盘](../../monitoring/grafana/everunfold-loki.json)，新增登录、评论、通知指标和结构化异常表。内容发布、页面与排期默认折叠。
+- 通过后端插件目录同步启用 `core.business-observability`。字段和 LogQL 示例见 [JSON 日志字段](../../monitoring/logging-fields.md#业务事件)。
+
+- 隔离 Grafana 13.3.1 与 Loki 3.7.0 验证了 77 个面板查询和原 UID 覆盖导入。浏览器核对失败率、默认折叠和按业务标记定位。
+
 ## JSON 日志字段与实测示例
 
 - 统一部署为 API 显式传入 `--no-access-log`，由 FastAPI 应用中间件记录访问日志。已更新前后端访问摘要与 Uvicorn 原生格式的实测示例。

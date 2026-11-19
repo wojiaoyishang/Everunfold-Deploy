@@ -53,6 +53,35 @@
 | `worker_hostname` | string | 执行上下文提供的 Celery Worker 名称。 |
 | `duration_ms` | number | Celery 成功记录提供的执行时长，单位毫秒。 |
 
+## 业务事件
+
+启用 `core.business-observability` 后输出 `event="business_event"`。
+日志仅包含观察和关联所需字段。账号、邮件地址、密码、验证码和正文不参与输出。
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `business_action` | string | `login`、`comment_submit`、`comment_moderate`、`notification`，或发布、页面、账号动作。 |
+| `business_result` | string | `success`、`failure`、`challenge`（待二次验证）、`suppressed`（跳过）、`unknown`（结果未知）。 |
+| `business_stage` | string | 可选阶段，例如 `password`、`second_factor`、`manual`、`scheduled`、`delivery`、`security_mail`。评论审核可为 `approve`、`reject` 等动作。 |
+| `business_state` | string | 可选结果状态，例如评论 `pending` / `approved`，发布 `first` / `update` / `republish`。 |
+| `business_reason`, `business_error_code` | string, number | 归类后的失败原因及可用的稳定业务错误码。 |
+| `status`, `request_id` | number, string | FastAPI 的 HTTP 状态码及应用访问日志里的同一个请求 ID。 |
+| `business_resource_kind`, `resource_id` | string, string | 可选业务对象类型与 ID。通知的 `resource_id` 为投递或安全邮件 ID。 |
+| `business_channel`, `business_notification_type` | string, string | `email`、`in-app` 或插件渠道，以及通知定义 ID。 |
+| `business_attempt`, `business_affected_count` | number | 可选投递尝试次数和批量评论审核影响条数。 |
+| `business_role_changed`, `business_account_enabled` | boolean | 角色发生变更，或账号启停后的状态。 |
+| `symbol` | string | `business.<action>.<result>`，例如 `business.comment_submit.success`。 |
+
+SMTP 返回接受时记邮件成功。结果未知和跳过各自计数，邮件失败率只以已知成功与失败为分母。
+站内通知在数据库入箱后记成功。提交评论时待审核算提交成功，审核操作另外统计。
+账号安全邮件包含邮箱验证、注册验证、密码找回及密码重置完成通知。仅建立排期时记录排期动作，
+定时发布的执行结果由 Worker 另行记录。
+
+```logql
+{job="docker", service_name=~"(?i).*everunfold.*"}
+  | json | event="business_event" | business_channel="email" | business_result="failure"
+```
+
 ## 代码中写日志
 
 FastAPI、Worker 和 Scheduler 使用 Python 标准库的 `logging.getLogger(__name__)`。部署入口会统一设置格式，可使用 `debug`、`info`、`warning`、`error`、`exception` 和 `critical`。业务标记通过 `extra` 传入。

@@ -58,6 +58,15 @@ docker compose -f compose.collectors.yaml --profile celery up -d celery-exporter
 
 ## 应用日志
 
+将 [Loki 仪表盘](grafana/everunfold-loki.json) 导入 Grafana 13.1 或更新版本，选择 Loki 数据源。
+JSON 使用 `job="docker"`、包含 `everunfold` 的 `service_name` 以及 `host` 选择日志。
+按现有采集标签确认匹配范围。页面内 LogQL 输入框支持过滤阶段，时间和服务器沿用仪表盘选择。
+
+「业务事件」优先展示登录、评论和通知。文章、说说、页面与排期在折叠区。
+部署新版后端后，通过现有部署流程同步后端插件目录并启动 API 和 Worker。
+在后台的插件管理中确认 `core.business-observability` 已启用。
+开启结构化日志并通过 Alloy 采集，业务成功、失败等结果会出现在 Loki。
+
 完整字段、代码用法和查询示例见 [JSON 日志字段](logging-fields.md)。
 
 统一部署和前后端独立部署的「日志」分组都提供「结构化日志」。默认开启，应用每行输出一个 JSON 对象，包含 `time`、`level`、`component`、`event`、`message` 和对应事件的字段。选择「关闭（纯文本）」后，同一批应用事件以可读文本输出。配置保存在 `environment.EVERUNFOLD_LOG_FORMAT`，值为 `json` 或 `text`。已有部署首次使用此选项时先用新版前后端源码构建，之后保存并重启即可切换。

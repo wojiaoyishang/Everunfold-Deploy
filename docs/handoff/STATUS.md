@@ -2,6 +2,12 @@
 
 更新时间为 2026-11-19。
 
+## Grafana 业务来源与邮件诊断
+
+- 业务页新增登录失败与邮件投递明细，其他 HTTP 业务可按真实来源与 User-Agent 排查。保留既有 UID 和面板 ID。
+
+- 隔离 Grafana 与 Loki 验证全部 79 个查询与原 UID 覆盖，浏览器核对登录标识、客户端 IP、User-Agent、收件域名及投递耗时。
+
 ## Grafana 业务事件
 
 - 已更新 [Loki Grafana V2 仪表盘](../../monitoring/grafana/everunfold-loki.json)，新增登录、评论、通知指标和结构化异常表。内容发布、页面与排期默认折叠。

@@ -6003,7 +6003,15 @@
                           "business_affected_count",
                           "business_role_changed",
                           "business_account_enabled",
-                          "resource_id"
+                          "resource_id",
+                          "client_ip_source",
+                          "peer_ip",
+                          "trusted_proxy",
+                          "ip_policy_revision",
+                          "business_attempted_username",
+                          "business_recipient_domain",
+                          "business_mail_profile_id",
+                          "business_delivery_duration_ms"
                         ]
                       }
                     }
@@ -6057,7 +6065,15 @@
                         "business_affected_count": 38,
                         "business_role_changed": 39,
                         "business_account_enabled": 40,
-                        "resource_id": 41
+                        "resource_id": 41,
+                        "client_ip_source": 42,
+                        "peer_ip": 43,
+                        "trusted_proxy": 44,
+                        "ip_policy_revision": 45,
+                        "business_attempted_username": 46,
+                        "business_recipient_domain": 47,
+                        "business_mail_profile_id": 48,
+                        "business_delivery_duration_ms": 49
                       },
                       "renameByName": {
                         "Time": "Loki 时间",
@@ -6101,7 +6117,15 @@
                         "business_affected_count": "影响条数",
                         "business_role_changed": "角色变更",
                         "business_account_enabled": "账号启用",
-                        "resource_id": "资源 ID"
+                        "resource_id": "资源 ID",
+                        "client_ip_source": "IP 来源",
+                        "peer_ip": "直连 IP",
+                        "trusted_proxy": "信任代理",
+                        "ip_policy_revision": "真实 IP 规则版本",
+                        "business_attempted_username": "尝试用户名",
+                        "business_recipient_domain": "收件域名",
+                        "business_mail_profile_id": "发送配置 ID",
+                        "business_delivery_duration_ms": "投递耗时 (ms)"
                       }
                     }
                   }
@@ -8247,7 +8271,7 @@
         "kind": "Panel",
         "spec": {
           "id": 73,
-          "title": "最近 500 条失败或结果未知",
+          "title": "其他业务失败或结果未知",
           "description": "按时间倒序。用请求 ID 关联 FastAPI 访问日志，用任务或资源 ID 关联 Worker 处理记录。",
           "links": [],
           "data": {
@@ -8267,7 +8291,7 @@
                         "name": "${ds_loki}"
                       },
                       "spec": {
-                        "expr": "{job=\"docker\",service_name=~\"(?i).*everunfold.*\",host=~`${host:regex}`} |= \"business_event\" | json eu_event=\"event\", eu_action=\"business_action\", eu_result=\"business_result\" | eu_event=\"business_event\" | eu_action=~\"login|comment_submit|comment_moderate|notification|registration|email_verification|password_recovery|password_change|admin_password_reset|account_access\" | __error__=\"\" | eu_result=~\"failure|unknown\" | keep host, service_name",
+                        "expr": "{job=\"docker\",service_name=~\"(?i).*everunfold.*\",host=~`${host:regex}`} |= \"business_event\" | json eu_event=\"event\", eu_action=\"business_action\", eu_result=\"business_result\", eu_channel=\"business_channel\" | eu_event=\"business_event\" | eu_action=~\"comment_submit|comment_moderate|notification|registration|email_verification|password_recovery|password_change|admin_password_reset|account_access\" | __error__=\"\" | eu_result=~\"failure|unknown\" | (eu_action!=\"notification\" or eu_channel!=\"email\") | keep host, service_name",
                         "editorMode": "code",
                         "queryType": "range",
                         "instant": false,
@@ -8328,7 +8352,17 @@
                           "request_id",
                           "task_id",
                           "symbol",
-                          "host"
+                          "host",
+                          "client_ip",
+                          "client_ip_source",
+                          "user_agent",
+                          "method",
+                          "request_url",
+                          "route",
+                          "duration_ms",
+                          "peer_ip",
+                          "trusted_proxy",
+                          "ip_policy_revision"
                         ]
                       }
                     }
@@ -8360,7 +8394,17 @@
                         "request_id": 16,
                         "task_id": 17,
                         "symbol": 18,
-                        "host": 19
+                        "host": 19,
+                        "client_ip": 20,
+                        "client_ip_source": 21,
+                        "user_agent": 22,
+                        "method": 23,
+                        "request_url": 24,
+                        "route": 25,
+                        "duration_ms": 26,
+                        "peer_ip": 27,
+                        "trusted_proxy": 28,
+                        "ip_policy_revision": 29
                       },
                       "renameByName": {
                         "Time": "Loki 时间",
@@ -8382,7 +8426,17 @@
                         "request_id": "请求 ID",
                         "task_id": "任务 ID",
                         "symbol": "业务标记",
-                        "host": "服务器"
+                        "host": "服务器",
+                        "client_ip": "真实客户端 IP",
+                        "client_ip_source": "IP 来源",
+                        "user_agent": "User-Agent",
+                        "method": "方法",
+                        "request_url": "请求路径",
+                        "route": "路由模板",
+                        "duration_ms": "耗时 (ms)",
+                        "peer_ip": "直连 IP",
+                        "trusted_proxy": "信任代理",
+                        "ip_policy_revision": "真实 IP 规则版本"
                       }
                     }
                   }
@@ -8549,6 +8603,88 @@
                       {
                         "id": "custom.width",
                         "value": 150
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "User-Agent"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 240
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "方法"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 64
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "请求路径"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 220
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "路由模板"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 200
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "耗时 (ms)"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 96
+                      },
+                      {
+                        "id": "unit",
+                        "value": "suffix: ms"
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 1
                       }
                     ]
                   }
@@ -8897,6 +9033,817 @@
                   "decimals": 1
                 },
                 "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-78": {
+        "kind": "Panel",
+        "spec": {
+          "id": 78,
+          "title": "登录失败明细",
+          "description": "客户端 IP 由后台真实 IP 规则计算。邮箱登录显示掩码和域名。请求 ID 可关联同一条访问日志。",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${ds_loki}"
+                      },
+                      "spec": {
+                        "expr": "{job=\"docker\",service_name=~\"(?i).*everunfold.*\",host=~`${host:regex}`} |= \"business_event\" | json eu_event=\"event\", eu_action=\"business_action\", eu_result=\"business_result\", eu_stage=\"business_stage\", eu_reason=\"business_reason\" | eu_event=\"business_event\" | eu_action=~\"login\" | __error__=\"\" | eu_result=\"failure\" | keep host, service_name",
+                        "editorMode": "code",
+                        "queryType": "range",
+                        "instant": false,
+                        "range": true,
+                        "maxLines": 500,
+                        "direction": "backward"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [
+                {
+                  "kind": "Transformation",
+                  "group": "extractFields",
+                  "spec": {
+                    "options": {
+                      "source": "Line",
+                      "format": "json",
+                      "replace": false
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "extractFields",
+                  "spec": {
+                    "options": {
+                      "source": "labels",
+                      "format": "json",
+                      "replace": false
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "filterFieldsByName",
+                  "spec": {
+                    "options": {
+                      "include": {
+                        "names": [
+                          "Time",
+                          "business_attempted_username",
+                          "client_ip",
+                          "user_agent",
+                          "business_error_code",
+                          "business_reason",
+                          "status",
+                          "business_stage",
+                          "client_ip_source",
+                          "request_id",
+                          "method",
+                          "request_url",
+                          "route",
+                          "duration_ms",
+                          "peer_ip",
+                          "trusted_proxy",
+                          "ip_policy_revision",
+                          "host"
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "organize",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {},
+                      "indexByName": {
+                        "Time": 0,
+                        "business_attempted_username": 1,
+                        "client_ip": 2,
+                        "user_agent": 3,
+                        "business_error_code": 4,
+                        "business_reason": 5,
+                        "status": 6,
+                        "business_stage": 7,
+                        "client_ip_source": 8,
+                        "request_id": 9,
+                        "method": 10,
+                        "request_url": 11,
+                        "route": 12,
+                        "duration_ms": 13,
+                        "peer_ip": 14,
+                        "trusted_proxy": 15,
+                        "ip_policy_revision": 16,
+                        "host": 17
+                      },
+                      "renameByName": {
+                        "Time": "Loki 时间",
+                        "business_attempted_username": "尝试用户名",
+                        "client_ip": "真实客户端 IP",
+                        "user_agent": "User-Agent",
+                        "business_error_code": "业务错误码",
+                        "business_reason": "失败原因",
+                        "status": "状态码",
+                        "business_stage": "阶段",
+                        "client_ip_source": "IP 来源",
+                        "request_id": "请求 ID",
+                        "method": "方法",
+                        "request_url": "请求路径",
+                        "route": "路由模板",
+                        "duration_ms": "耗时 (ms)",
+                        "peer_ip": "直连 IP",
+                        "trusted_proxy": "信任代理",
+                        "ip_policy_revision": "真实 IP 规则版本",
+                        "host": "服务器"
+                      }
+                    }
+                  }
+                }
+              ],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.3.1",
+            "spec": {
+              "options": {
+                "showHeader": true,
+                "cellHeight": "sm",
+                "footer": {
+                  "show": false
+                },
+                "sortBy": [
+                  {
+                    "displayName": "Loki 时间",
+                    "desc": true
+                  }
+                ],
+                "enablePagination": true
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "align": "auto",
+                    "cellOptions": {
+                      "type": "auto"
+                    },
+                    "inspect": false
+                  },
+                  "noValue": "—"
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Loki 时间"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 166
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "User-Agent"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 240
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "状态码"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 73
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-text"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "range",
+                            "options": {
+                              "from": 200,
+                              "to": 299,
+                              "result": {
+                                "color": "green",
+                                "index": 0
+                              }
+                            }
+                          },
+                          {
+                            "type": "range",
+                            "options": {
+                              "from": 400,
+                              "to": 499,
+                              "result": {
+                                "color": "orange",
+                                "index": 1
+                              }
+                            }
+                          },
+                          {
+                            "type": "range",
+                            "options": {
+                              "from": 500,
+                              "to": 599,
+                              "result": {
+                                "color": "red",
+                                "index": 2
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "请求 ID"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 244
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "方法"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 64
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "请求路径"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 220
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "路由模板"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 200
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "耗时 (ms)"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 96
+                      },
+                      {
+                        "id": "unit",
+                        "value": "suffix: ms"
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 1
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "服务器"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 150
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "尝试用户名"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 155
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "真实客户端 IP"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 137
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "业务错误码"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 99
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "失败原因"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 150
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "阶段"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 102
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "IP 来源"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 124
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "panel-79": {
+        "kind": "Panel",
+        "spec": {
+          "id": 79,
+          "title": "邮件投递明细",
+          "description": "每次记录展示实际投递或跳过结果、收件域名、发送配置、尝试次数与处理耗时。",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${ds_loki}"
+                      },
+                      "spec": {
+                        "expr": "{job=\"docker\",service_name=~\"(?i).*everunfold.*\",host=~`${host:regex}`} |= \"business_event\" | json eu_event=\"event\", eu_action=\"business_action\", eu_result=\"business_result\", eu_channel=\"business_channel\", eu_reason=\"business_reason\", eu_type=\"business_notification_type\" | eu_event=\"business_event\" | eu_action=~\"notification\" | __error__=\"\" | eu_channel=\"email\" | keep host, service_name",
+                        "editorMode": "code",
+                        "queryType": "range",
+                        "instant": false,
+                        "range": true,
+                        "maxLines": 500,
+                        "direction": "backward"
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [
+                {
+                  "kind": "Transformation",
+                  "group": "extractFields",
+                  "spec": {
+                    "options": {
+                      "source": "Line",
+                      "format": "json",
+                      "replace": false
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "extractFields",
+                  "spec": {
+                    "options": {
+                      "source": "labels",
+                      "format": "json",
+                      "replace": false
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "filterFieldsByName",
+                  "spec": {
+                    "options": {
+                      "include": {
+                        "names": [
+                          "Time",
+                          "business_result",
+                          "business_recipient_domain",
+                          "business_notification_type",
+                          "business_reason",
+                          "business_delivery_duration_ms",
+                          "business_attempt",
+                          "business_mail_profile_id",
+                          "resource_id",
+                          "task_id",
+                          "business_stage",
+                          "host"
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "Transformation",
+                  "group": "organize",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {},
+                      "indexByName": {
+                        "Time": 0,
+                        "business_result": 1,
+                        "business_recipient_domain": 2,
+                        "business_notification_type": 3,
+                        "business_reason": 4,
+                        "business_delivery_duration_ms": 5,
+                        "business_attempt": 6,
+                        "business_mail_profile_id": 7,
+                        "resource_id": 8,
+                        "task_id": 9,
+                        "business_stage": 10,
+                        "host": 11
+                      },
+                      "renameByName": {
+                        "Time": "Loki 时间",
+                        "business_result": "业务结果",
+                        "business_recipient_domain": "收件域名",
+                        "business_notification_type": "通知类型",
+                        "business_reason": "失败原因",
+                        "business_delivery_duration_ms": "投递耗时 (ms)",
+                        "business_attempt": "投递次数",
+                        "business_mail_profile_id": "发送配置 ID",
+                        "resource_id": "资源 ID",
+                        "task_id": "任务 ID",
+                        "business_stage": "阶段",
+                        "host": "服务器"
+                      }
+                    }
+                  }
+                }
+              ],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "table",
+            "version": "13.3.1",
+            "spec": {
+              "options": {
+                "showHeader": true,
+                "cellHeight": "sm",
+                "footer": {
+                  "show": false
+                },
+                "sortBy": [
+                  {
+                    "displayName": "Loki 时间",
+                    "desc": true
+                  }
+                ],
+                "enablePagination": true
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "align": "auto",
+                    "cellOptions": {
+                      "type": "auto"
+                    },
+                    "inspect": false
+                  },
+                  "noValue": "—"
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Loki 时间"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 166
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "任务 ID"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 244
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "服务器"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 150
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "业务结果"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 85
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-text"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "value",
+                            "options": {
+                              "success": {
+                                "color": "green",
+                                "text": "成功",
+                                "index": 0
+                              },
+                              "failure": {
+                                "color": "red",
+                                "text": "失败",
+                                "index": 1
+                              },
+                              "unknown": {
+                                "color": "orange",
+                                "text": "结果未知",
+                                "index": 2
+                              },
+                              "suppressed": {
+                                "color": "gray",
+                                "text": "跳过",
+                                "index": 3
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "收件域名"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 155
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "通知类型"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 208
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "失败原因"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 150
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "投递耗时 (ms)"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 105
+                      },
+                      {
+                        "id": "unit",
+                        "value": "suffix: ms"
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 1
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "发送配置 ID"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 224
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "资源 ID"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 224
+                      },
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "auto",
+                          "inspect": true
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "阶段"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.width",
+                        "value": 102
+                      }
+                    ]
+                  }
+                ]
               }
             }
           }
@@ -10096,6 +11043,33 @@
                     {
                       "kind": "RowsLayoutRow",
                       "spec": {
+                        "title": "登录来源与浏览器",
+                        "collapse": false,
+                        "layout": {
+                          "kind": "GridLayout",
+                          "spec": {
+                            "items": [
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 0,
+                                  "width": 24,
+                                  "height": 11,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-78"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "RowsLayoutRow",
+                      "spec": {
                         "title": "通知投递",
                         "collapse": false,
                         "layout": {
@@ -10190,6 +11164,33 @@
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-72"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "RowsLayoutRow",
+                      "spec": {
+                        "title": "邮件诊断",
+                        "collapse": false,
+                        "layout": {
+                          "kind": "GridLayout",
+                          "spec": {
+                            "items": [
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 0,
+                                  "width": 24,
+                                  "height": 11,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-79"
                                   }
                                 }
                               }

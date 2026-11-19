@@ -56,7 +56,9 @@
 ## 业务事件
 
 启用 `core.business-observability` 后输出 `event="business_event"`。
-日志仅包含观察和关联所需字段。账号、邮件地址、密码、验证码和正文不参与输出。
+HTTP 业务事件和同一请求的访问日志共用一次来源解析。后台「真实 IP 来源配置」中的可信代理、
+地址来源与回退同时作用于两条记录。只有对应账号名可从请求或有效二次验证挑战取得时，登录失败才填入尝试用户名。
+密码、验证码、Cookie、完整邮件地址和正文不写入业务日志。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -66,9 +68,16 @@
 | `business_state` | string | 可选结果状态，例如评论 `pending` / `approved`，发布 `first` / `update` / `republish`。 |
 | `business_reason`, `business_error_code` | string, number | 归类后的失败原因及可用的稳定业务错误码。 |
 | `status`, `request_id` | number, string | FastAPI 的 HTTP 状态码及应用访问日志里的同一个请求 ID。 |
+| `client_ip`, `client_ip_source`, `peer_ip` | string 或 null | 按后台规则取出的客户端 IP、实际采用的来源和直连地址。未获信任且配置不回退时客户端 IP 为 null。 |
+| `trusted_proxy`, `ip_policy_revision` | boolean, number 或 null | 直连是否属于可信代理，以及本次使用的后台规则修订号。 |
+| `user_agent`, `method`, `request_url`, `route` | string 或 null | 浏览器或客户端标识、HTTP 方法、去掉查询串的路径及匹配的路由模板。 |
+| `duration_ms` | number | HTTP 请求处理时间，和对应访问日志一致。 |
+| `business_attempted_username` | string | 仅登录失败可用。用户名去掉首尾空格并转小写，邮箱登录仅记录掩码和域名，如 `***@example.test`。 |
 | `business_resource_kind`, `resource_id` | string, string | 可选业务对象类型与 ID。通知的 `resource_id` 为投递或安全邮件 ID。 |
 | `business_channel`, `business_notification_type` | string, string | `email`、`in-app` 或插件渠道，以及通知定义 ID。 |
 | `business_attempt`, `business_affected_count` | number | 可选投递尝试次数和批量评论审核影响条数。 |
+| `business_recipient_domain`, `business_mail_profile_id` | string | 邮件收件域名和发送配置 ID。发送配置或收件信息缺失时省略对应值。 |
+| `business_delivery_duration_ms` | number | 外部渠道投递处理的毫秒数，包括通知投递前检查。直接发送账号安全邮件时统计 SMTP 调用耗时。 |
 | `business_role_changed`, `business_account_enabled` | boolean | 角色发生变更，或账号启停后的状态。 |
 | `symbol` | string | `business.<action>.<result>`，例如 `business.comment_submit.success`。 |
 
@@ -80,6 +89,9 @@ SMTP 返回接受时记邮件成功。结果未知和跳过各自计数，邮件
 ```logql
 {job="docker", service_name=~"(?i).*everunfold.*"}
   | json | event="business_event" | business_channel="email" | business_result="failure"
+
+{job="docker", service_name=~"(?i).*everunfold.*"}
+  | json | symbol="business.login.failure" | client_ip="203.0.113.42"
 ```
 
 ## 代码中写日志

@@ -62,7 +62,8 @@ docker compose -f compose.collectors.yaml --profile celery up -d celery-exporter
 JSON 使用 `job="docker"`、包含 `everunfold` 的 `service_name` 以及 `host` 选择日志。
 按现有采集标签确认匹配范围。页面内 LogQL 输入框支持过滤阶段，时间和服务器沿用仪表盘选择。
 
-「业务事件」优先展示登录、评论和通知。文章、说说、页面与排期在折叠区。
+「业务事件」优先展示登录、评论和通知。登录失败表显示尝试用户名、真实客户端 IP 与浏览器。
+邮件投递表显示结果、收件域名、发送配置 ID 与耗时。文章、说说、页面与排期在折叠区。
 部署新版后端后，通过现有部署流程同步后端插件目录并启动 API 和 Worker。
 在后台的插件管理中确认 `core.business-observability` 已启用。
 开启结构化日志并通过 Alloy 采集，业务成功、失败等结果会出现在 Loki。

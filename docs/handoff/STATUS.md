@@ -4,6 +4,8 @@
 
 ## JSON 日志字段与实测示例
 
+- 统一部署为 API 显式传入 `--no-access-log`，由 FastAPI 应用中间件记录访问日志。已更新前后端访问摘要与 Uvicorn 原生格式的实测示例。
+
 - [字段说明](../../monitoring/logging-fields.md)列出前后端请求与 Celery 日志的字段、类型、代码用法、`symbol` 和 Loki 查询。
 - 样例来自隔离 FastAPI、Node.js 和 Celery prefork 的实际输出。请求日志省略查询串，Celery 结构化事件只写任务元数据和安全的异常信息。
 

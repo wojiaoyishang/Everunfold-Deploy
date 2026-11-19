@@ -247,6 +247,7 @@ def test_environment_isolation_and_worker_overrides(configured, monkeypatch):
     assert front["FRONTEND_WORKERS"] == "2"
     assert store.doc["backend"]["assistant"]["inbound_env"] not in front
     assert commands(layout)["api"][1][commands(layout)["api"][1].index("--workers") + 1] == "3"
+    assert "--no-access-log" in commands(layout)["api"][1]
     worker = commands(layout)["worker"][1]
     assert worker[worker.index("--concurrency") + 1] == "1"
     monkeypatch.setenv("WORKER_POOL", "prefork")

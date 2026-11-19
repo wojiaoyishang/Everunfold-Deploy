@@ -120,6 +120,7 @@ def commands(layout):
                 "--log-level",
                 env.get("API_LOG_LEVEL", "INFO").lower(),
                 "--no-proxy-headers",
+                "--no-access-log",
             ],
         ),
         "worker": (

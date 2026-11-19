@@ -18,7 +18,9 @@
 
 ## HTTP 请求
 
-以下字段用于 `event="http_access"`。FastAPI 的访问记录受 `API_LOG_LEVEL` 控制。
+以下字段用于 `event="http_access"`。前后端的 `message` 都按 `GET /路径 → 200` 显示，`request_url` 可单独查询。FastAPI 的访问记录受 `API_LOG_LEVEL` 控制。
+
+部署入口关闭 Uvicorn 的原生访问日志，每个进入 FastAPI 的 HTTP 请求由应用中间件记录一次。若用 Everunfold 的格式化器显式开启原生访问日志，`logger="uvicorn.access"` 的记录也会输出方法、过滤后的 URL 路径、HTTP 版本和状态。请求耗时、请求 ID 和 User-Agent 来自应用中间件。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -74,11 +76,12 @@ runtimeLogger.info("published", "Article publication completed", {
 
 ## 实测输出
 
-以下四行来自隔离环境的实际输出。两条请求分别访问 FastAPI 的健康检查和 Node.js 的登录页，测试请求都带有查询参数。后两行来自同一个 Celery prefork 任务，一条是执行完成日志，一条是业务代码带 `symbol` 的日志。
+以下日志来自隔离环境的实际输出。前三行分别是 FastAPI 应用、Node.js 和显式开启的 Uvicorn 原生访问日志，测试请求都访问 `/health/live` 并携带查询参数。后两行来自同一个 Celery prefork 任务。
 
 ```jsonl
-{"time":"2026-11-19T13:02:46.929460+00:00","component":"fastapi","level":"info","event":"http_access","logger":"uvicorn.error.everunfold.http","pid":1110067,"message":"GET → 200","request_id":"8f2bb4aa66c4455a901dac6b412e1011","request_url":"/health/live","route":"/health/live","http_version":"1.1","user_agent":"Everunfold-Monitor-Smoke/1.0","method":"GET","status":200,"outcome":"completed","duration_ms":120.465,"peer_ip":"127.0.0.1","client_ip":"127.0.0.1","client_ip_source":"peer","trusted_proxy":false,"ip_policy_revision":0,"x_real_ip":[],"x_forwarded_for":[],"forwarded":[],"cf_connecting_ip":[],"true_client_ip":[],"x_forwarded_proto":null}
-{"request_id":"cab5dba55572414183313fd12521b459","request_url":"/login","http_version":"1.1","user_agent":"Everunfold-Monitor-Smoke/1.0","node_id":"log-check","method":"GET","status":200,"outcome":"completed","duration_ms":4896.594,"peer_ip":"127.0.0.1","client_ip":"127.0.0.1","client_ip_source":"peer","trusted_proxy":false,"ip_policy_revision":null,"x_real_ip":[],"x_forwarded_for":[],"forwarded":[],"cf_connecting_ip":[],"true_client_ip":[],"x_forwarded_proto":null,"pid":1110179,"time":"2026-11-19T13:02:51.828Z","level":"info","component":"nodejs","event":"http_access","message":"GET → 200"}
+{"time":"2026-11-19T13:45:10.897331+00:00","component":"fastapi","level":"info","event":"http_access","logger":"uvicorn.error.everunfold.http","pid":1127420,"message":"GET /health/live → 200","request_id":"4f2f9504c09741eda4a24b9b8c0b2d0f","request_url":"/health/live","route":"/health/live","http_version":"1.1","user_agent":"Everunfold-Log-Check/1.0","method":"GET","status":200,"outcome":"completed","duration_ms":424.192,"peer_ip":"127.0.0.1","client_ip":"127.0.0.1","client_ip_source":"peer","trusted_proxy":false,"ip_policy_revision":null,"x_real_ip":[],"x_forwarded_for":[],"forwarded":[],"cf_connecting_ip":[],"true_client_ip":[],"x_forwarded_proto":null}
+{"request_id":"f28ed6ecbf6b4b629fe45af61dbae782","request_url":"/health/live","http_version":"1.1","user_agent":"Everunfold-Log-Check/1.0","node_id":"log-check","method":"GET","status":200,"outcome":"completed","duration_ms":1.417,"peer_ip":"127.0.0.1","client_ip":"127.0.0.1","client_ip_source":"peer","trusted_proxy":false,"ip_policy_revision":null,"x_real_ip":[],"x_forwarded_for":[],"forwarded":[],"cf_connecting_ip":[],"true_client_ip":[],"x_forwarded_proto":null,"pid":1127391,"time":"2026-11-19T13:45:06.194Z","level":"info","component":"nodejs","event":"http_access","message":"GET /health/live → 200"}
+{"time":"2026-11-19T13:45:11.714462+00:00","component":"fastapi","level":"info","event":"http_access","logger":"uvicorn.access","pid":1127523,"message":"GET /health/live → 200","method":"GET","request_url":"/health/live","http_version":"1.1","status":200}
 {"time":"2026-11-19T13:08:35.469262+00:00","component":"celery","level":"info","event":"task_finished","logger":"celery.app.trace","pid":1113536,"message":"Celery task success","task_id":"427922c5-dfc0-4525-bf59-b13e09b7535b","task_name":"everunfold.test.publish","root_id":"427922c5-dfc0-4525-bf59-b13e09b7535b","worker_hostname":"monitor-prefork@localhost","retries":0,"queue":"logging-fixture","duration_ms":0.852,"task_state":"SUCCESS"}
 {"time":"2026-11-19T13:08:35.468559+00:00","component":"celery","level":"info","event":"log","logger":"everunfold.example","pid":1113536,"message":"Article publication completed","task_id":"427922c5-dfc0-4525-bf59-b13e09b7535b","task_name":"everunfold.test.publish","root_id":"427922c5-dfc0-4525-bf59-b13e09b7535b","worker_hostname":"monitor-prefork@localhost","retries":0,"queue":"logging-fixture","symbol":"content.publish"}
 ```

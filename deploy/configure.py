@@ -7,7 +7,6 @@ import ipaddress
 import os
 import re
 import secrets
-import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -41,6 +40,7 @@ from monitoring_setup import (
     monitor_environment,
     monitor_errors,
 )
+from network_inputs import edit_fields, migrate_unified
 from storage import read
 from worker_capacity import add_capacity_fields, capacity_environment, capacity_errors
 
@@ -107,6 +107,8 @@ def configure(store, mode=None):
     by_key = {}
     setters = []
     native = d["mode"] == "native"
+    if not native:
+        migrate_unified(d)
     if be.get("BACKEND_BASE_URL"):
         ba["BACKEND_BASE_URL"] = be["BACKEND_BASE_URL"]
     if fe.get("PUBLIC_SITE_URL"):
@@ -162,34 +164,6 @@ def configure(store, mode=None):
     mirror_mapping = add_mirror_fields(add, value, d, "deploy", docker_active)
     setters.append(lambda: d.update(mirror_mapping()))
 
-    def docker_subnets(name):
-        if not docker_active():
-            raise ValueError("直接部署请填写实际来源 IP/CIDR。")
-        attached = {
-            value("network"),
-            *(part.strip() for part in value("extra_networks").split(",")),
-        }
-        if name not in attached:
-            raise ValueError(f"请先把 Docker 网络 {name} 加入主网络或额外网络。")
-        try:
-            result = subprocess.run(
-                [
-                    "docker",
-                    "network",
-                    "inspect",
-                    "--format",
-                    "{{range .IPAM.Config}}{{if .Subnet}}{{.Subnet}},{{end}}{{end}}",
-                    name,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            raise ValueError(f"无法读取 Docker 网络 {name} 的子网。") from None
-        return result.stdout.strip()
-
     for key, label in (("container", "容器名称"), ("network", "主网络")):
         dep(
             key,
@@ -214,23 +188,18 @@ def configure(store, mode=None):
         valid=lambda s: s in {"0", "1"},
         active=docker_active,
     )
-    dep(
-        "tls_proxy_network",
-        "宿主反代所在 Docker 网络",
-        valid=lambda s: not s or bool(re.fullmatch(r"[\w.-]+", s)),
-        active=docker_active,
-        empty="不自动信任",
-        hint="例如 1panel-network。启动时读取其网关 IP，供两端 HTTPS 节点页信任宿主反代。",
-    )
     for role, title in (("backend", "后端"), ("frontend", "前端")):
-        dep(
+        item = add(
             role + "_bind",
             title + "宿主映射绑定 IP",
+            d[role + "_bind"],
             valid=lambda s: not s or valid_ip(s),
             active=docker_active,
             empty="不映射",
-            hint="127.0.0.1 供宿主反代；0.0.0.0 绑定全部 IPv4 接口；也可填宿主具体 IP。留空关闭映射。",
+            group="部署",
+            hint="填写宿主 IP 或网桥名，留空关闭映射。",
         )
+        setters.append(lambda role=role, item=item: d.update({item.key: literal(role + "_bind")}))
         dep(
             role + "_port",
             title + "宿主映射端口",
@@ -434,7 +403,29 @@ def configure(store, mode=None):
     )
     setters.append(
         lambda: internal_auth.update(
-            allowed_peer_ips=[ip.strip() for ip in value("backend_peers").split(",") if ip.strip()]
+            allowed_peer_ips=[
+                ip.strip() for ip in literal("backend_peers").split(",") if ip.strip()
+            ]
+        )
+    )
+    front_backend = fa.setdefault("backend", {})
+    profiles = f.get("connection_profiles")
+    if profiles:
+        current = profiles["profiles"].get(profiles["active"], {})
+        front_backend = current.setdefault("backend", front_backend)
+    add(
+        "frontend_peers",
+        "后端调用前端接收器的来源 IP/CIDR",
+        ", ".join(front_backend.get("allowed_peer_ips") or ["127.0.0.1", "::1"]),
+        valid=peer_list,
+        group="自动配对",
+        hint="填写前端实际看到的直连地址。统一容器内的回环地址会自动保留。",
+    )
+    setters.append(
+        lambda: front_backend.update(
+            allowed_peer_ips=[
+                ip.strip() for ip in literal("frontend_peers").split(",") if ip.strip()
+            ]
         )
     )
     for role, config, env, title in (
@@ -450,7 +441,13 @@ def configure(store, mode=None):
             "127.0.0.1" if native else "0.0.0.0",
             valid=lambda s: s in {"127.0.0.1", "0.0.0.0"},
             group="进程",
-            hint="统一部署通过 127.0.0.1 互通；Docker 映射需 0.0.0.0。",
+            active=lambda: not docker_active(),
+            hint="原生统一部署通过 127.0.0.1 互通。",
+        )
+        setters.append(
+            lambda env=env, prefix=prefix: (
+                env.update({prefix + "_HOST": "0.0.0.0"}) if docker_active() else None
+            )
         )
         bind(
             env,
@@ -536,19 +533,39 @@ def configure(store, mode=None):
         )
         setters.append(
             lambda proxies=proxies, monitor=monitor: monitor.update(
-                trusted_tls_proxy_ips=[v.strip() for v in proxies.value.split(",") if v.strip()]
+                trusted_tls_proxy_ips=[
+                    v.strip() for v in literal(proxies.key).split(",") if v.strip()
+                ]
             )
         )
+    frontend_console = fa["nodes_monitor"]
+    add(
+        "console_peers",
+        "允许访问前端节点控制台的来源 IP/CIDR",
+        ", ".join(frontend_console.get("allowed_peer_ips", [])),
+        valid=peer_list,
+        group="节点控制台",
+        empty="沿用现有访问规则",
+        hint="按前端实际看到的直连来源校验。",
+    )
+
+    def save_frontend_console_peers():
+        peers = [ip.strip() for ip in literal("console_peers").split(",") if ip.strip()]
+        if peers:
+            frontend_console["allowed_peer_ips"] = peers
+        else:
+            frontend_console.pop("allowed_peer_ips", None)
+
+    setters.append(save_frontend_console_peers)
     bind(be, "API_WORKERS", "workers", "API worker 数", "1", valid=positive, group="进程")
     add_capacity_fields(add, value, be)
-    add_monitoring_fields(add, value, be, combined=True, lookup=docker_subnets)
-    add_direct_metrics_fields(add, value, fe, docker_subnets)
+    add_monitoring_fields(add, value, be, combined=True)
+    add_direct_metrics_fields(add, value, fe)
     add_peer_field(
         add,
         "frontend_metrics_peers",
         "前端内部指标来源 IP/CIDR",
         fe.get(NODE_PEERS, LOCAL),
-        lookup=docker_subnets,
         optional=True,
         active=lambda: value("metrics_enabled") == "1",
         hint="统一容器内的后端采集保留回环来源。仅在需要时填写额外采集网段。",
@@ -608,8 +625,6 @@ def configure(store, mode=None):
                 a, b = map(ipaddress.ip_address, hosts)
                 if a == b or (a.version == b.version and (a.is_unspecified or b.is_unspecified)):
                     issues.append("两端宿主映射的绑定 IP 和端口冲突。")
-            if any(value(r + "_host") != "0.0.0.0" for r in ("backend", "frontend")):
-                issues.append("Docker 模式的两端绑定 IP 须为 0.0.0.0，以便端口映射访问。")
             if value("network") in {"host", "none"}:
                 issues.append("请选择网桥网络，不支持 host / none。")
         if value("inbound") == value("outbound"):
@@ -626,14 +641,29 @@ def configure(store, mode=None):
             + direct_metrics_errors(value, value("metrics_token"), value("metrics_node_token"))
         )
 
+    address_types = {
+        "backend_peers": "source",
+        "console_peers": "source",
+        "frontend_peers": "source",
+        "backend_proxies": "gateway",
+        "frontend_proxies": "gateway",
+        "backend_bind": "single",
+        "frontend_bind": "single",
+        "metrics_peers": "source",
+        "frontend_metrics_peers": "source",
+        "frontend_direct_peers": "source",
+    }
+    literal, address_mapping = edit_fields(by_key, d, address_types, docker_active)
+
     def apply():
         for setter in setters:
             setter()
         be.update(capacity_environment(value))
-        be.update(monitor_environment(value, frontend="http://127.0.0.1:" + fe["FRONTEND_PORT"]))
+        d.update(address_mapping())
+        be.update(monitor_environment(literal, frontend="http://127.0.0.1:" + fe["FRONTEND_PORT"]))
         fe[METRICS + "NODE_TOKEN"] = be[METRICS + "NODE_TOKEN"]
-        fe[NODE_PEERS] = ",".join(networks(f"{LOCAL},{value('frontend_metrics_peers')}"))
-        fe.update(direct_metrics_environment(value))
+        fe[NODE_PEERS] = ",".join(networks(f"{LOCAL},{literal('frontend_metrics_peers')}"))
+        fe.update(direct_metrics_environment(literal))
         be["EVERUNFOLD_LOG_FORMAT"] = fe["EVERUNFOLD_LOG_FORMAT"] = value("log_format")
         for name, index in (("CELERY_BROKER_URL", 1), ("CELERY_RESULT_BACKEND_URL", 2)):
             if not be[name]:
@@ -744,7 +774,17 @@ def normalize(store):
             "base_url": "http://127.0.0.1:" + be["API_PORT"],
             "allowed_peer_ips": list(
                 dict.fromkeys(
-                    [*fa.get("backend", {}).get("allowed_peer_ips", []), "127.0.0.1", "::1"]
+                    [
+                        *(
+                            f.get("connection_profiles", {})
+                            .get("profiles", {})
+                            .get(f.get("connection_profiles", {}).get("active"), {})
+                            .get("backend", fa.get("backend", {}))
+                            .get("allowed_peer_ips", [])
+                        ),
+                        "127.0.0.1",
+                        "::1",
+                    ]
                 )
             ),
             "nextjs_to_fastapi_token_env": meta["inbound_env"],

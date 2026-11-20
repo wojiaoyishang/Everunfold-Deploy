@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from config_mirrors import BOOTSTRAP_KEYS, NPM, resolve_sources
 from config_model import Check
+from network_inputs import migrate_unified, unified_addresses
 from storage import ROOT, lock, read, write
 from worker_capacity import PROCESS_KEYS, capacity_arguments
 
@@ -258,7 +260,14 @@ def compile_frontend(store, directory, image=None, *, plugins_only=False):
             "FRONTEND_BUILD_WORKERS=" + d["build_workers"],
             "-e",
             "NODE_OPTIONS=" + memory,
+            "-e",
+            "EVERUNFOLD_BACKEND_PATH=/contracts/backend",
+            "-e",
+            "EVERUNFOLD_CONTRACT_CACHE=/build/npm-cache/everunfold-contracts",
+            "-e",
+            "EVERUNFOLD_CONTRACT_BASE_URL",
             *mount(d["frontend_source"], "/workspace", True),
+            *mount(d["backend_source"], "/contracts/backend", True),
             *mount(directory, "/output"),
             *mount(cache, "/build/npm-cache"),
             *mount(plugins, "/plugins"),
@@ -293,6 +302,8 @@ def compile_frontend(store, directory, image=None, *, plugins_only=False):
             "OUTPUT_ROOT": str(directory),
             "PLUGIN_OUTPUT": str(plugins),
             "npm_config_cache": str(cache),
+            "EVERUNFOLD_BACKEND_PATH": d["backend_source"],
+            "EVERUNFOLD_CONTRACT_CACHE": str(cache / "everunfold-contracts"),
             "FRONTEND_BUILD_WORKERS": d["build_workers"],
             "NODE_OPTIONS": memory,
         }
@@ -329,6 +340,7 @@ def build(store):
     if d["mode"] == "docker":
         manifest["image"] = build_image(store, directory, revisions)
         manifest["celery_autoscale"] = True
+        manifest["network_inputs"] = True
     else:
         execute(
             [
@@ -490,7 +502,37 @@ def build_environment():
     }
 
 
-def layout_for(store, release):
+def resolve_deployment_networks(store, release):
+    settings = store.doc["deployment"]
+    migrate_unified(settings)
+    configured = any(
+        key.startswith("EVERUNFOLD_NETWORK_INPUT_") and value for key, value in settings.items()
+    )
+    snapshot = (
+        {
+            item["Name"]: item
+            for item in json.loads(
+                execute(["docker", "network", "inspect", *networks(settings)], capture=True)
+            )
+        }
+        if configured
+        else {}
+    )
+    binds, overrides = unified_addresses(store.doc, snapshot)
+    if any(overrides.values()) and not release.get("network_inputs"):
+        backend, frontend = overrides["backend"], overrides["frontend"]
+        if backend != frontend or set(backend) != {"EVERUNFOLD_NODES_TLS_PROXY_IPS"}:
+            raise ValueError("当前镜像未支持按网络名解析来源，请先完整构建一次。")
+    if all(binds.values()) and settings["backend_port"] == settings["frontend_port"]:
+        first, second = (ipaddress.ip_address(binds[role]) for role in ("backend", "frontend"))
+        if first == second or (
+            first.version == second.version and (first.is_unspecified or second.is_unspecified)
+        ):
+            raise ValueError("解析后的两端宿主映射 IP 和端口冲突。")
+    return binds, overrides
+
+
+def layout_for(store, release, addresses=None):
     d = store.doc["deployment"]
     directory = store.var / "releases" / release["release"]
     docker = d["mode"] == "docker"
@@ -507,16 +549,13 @@ def layout_for(store, release):
         "/opt/backend/venv/bin/python" if docker else str(directory / "backend/.venv/bin/python")
     )
     layout["node"] = "node" if docker else (shutil.which("node") or "node")
-    if docker and d["tls_proxy_network"]:
-        name = d["tls_proxy_network"]
-        if name not in networks(d):
-            raise ValueError("宿主反代网络必须是主网络或额外网络之一。")
-        info = json.loads(execute(["docker", "network", "inspect", name], capture=True))[0]
-        gateways = [item["Gateway"] for item in info["IPAM"]["Config"] if item.get("Gateway")]
-        if info["Driver"] != "bridge" or not gateways:
-            raise ValueError("宿主反代网络必须是有网关 IP 的网桥。")
-        layout["tls_proxy_ips"] = ",".join(gateways)
-        print(f"[network] 宿主反代 {name} → {layout['tls_proxy_ips']}", flush=True)
+    if docker:
+        _, overrides = addresses or resolve_deployment_networks(store, release)
+        if any(overrides.values()):
+            if release.get("network_inputs"):
+                layout["network_environment"] = overrides
+            else:
+                layout["tls_proxy_ips"] = overrides["backend"]["EVERUNFOLD_NODES_TLS_PROXY_IPS"]
     write(store.runtime / "runtime.yaml", layout)
     return layout
 
@@ -728,6 +767,11 @@ def start(store, release, *, initialize=False, foreground=False):
         raise ValueError("FRONTEND_WORKERS 必须是 1–32 之间的整数。")
     if workers != "1" and not (directory / "frontend/tools/frontend-cluster.ts").is_file():
         raise ValueError("当前前端产物不支持多个运行 worker；请用新版前端源码重新编译。")
+    console = store.doc["frontend"]["application"].get("nodes_monitor", {})
+    if console.get("allowed_peer_ips") or d.get("EVERUNFOLD_NETWORK_INPUT_CONSOLE_PEERS"):
+        schema = directory / "frontend/src/core/config/schema.ts"
+        if not schema.is_file() or "EVERUNFOLD_FRONTEND_NODES_ALLOWED_PEERS" not in schema.read_text():
+            raise ValueError("当前前端产物不支持节点控制台来源限制，请先完整构建一次。")
     if store.doc["backend"]["environment"].get("EVERUNFOLD_METRICS_TOKEN") and (
         not (directory / "backend/app/entrypoints/serve_api.py").is_file()
         or not (directory / "frontend/tools/frontend-metrics.ts").is_file()
@@ -740,10 +784,12 @@ def start(store, release, *, initialize=False, foreground=False):
     if "--autoscale" in capacity and d["mode"] == "docker" and not release.get("celery_autoscale"):
         raise ValueError("当前部署镜像不支持 Celery 自动伸缩；请更新部署仓库后完整构建一次。")
     container = None
+    addresses = None
     if d["mode"] == "docker":
         ensure_docker()
         require_image(release["image"])
         ensure_networks(d)
+        addresses = resolve_deployment_networks(store, release)
     elif not foreground:
         ensure_native_service()
     for role in ("backend", "frontend"):
@@ -754,7 +800,7 @@ def start(store, release, *, initialize=False, foreground=False):
         if not foreground:
             stop(store)
         store.render()
-        layout_for(store, release)
+        layout_for(store, release, addresses)
         runtime_action(store, release, "prepare-init" if initialize else "prepare")
         store.import_runtime()
         store.save()
@@ -779,7 +825,7 @@ def start(store, release, *, initialize=False, foreground=False):
             *runtime_mounts(store, release),
         ]
         for role, key in (("backend", "API_PORT"), ("frontend", "FRONTEND_PORT")):
-            host = d.get(role + "_bind", d.get("bind", "127.0.0.1"))
+            host = addresses[0][role]
             if host:
                 host = f"[{host}]" if ":" in host else host
                 mapping = f"{host}:{d[role + '_port']}:{store.doc[role]['environment'][key]}"

@@ -64,6 +64,7 @@ def environment(layout, role):
         env.pop("FRONTEND_WORKERS", None)
     if layout.get("tls_proxy_ips"):
         env["EVERUNFOLD_NODES_TLS_PROXY_IPS"] = layout["tls_proxy_ips"]
+    env.update(layout.get("network_environment", {}).get(role, {}))
     return env
 
 

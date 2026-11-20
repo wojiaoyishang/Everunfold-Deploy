@@ -195,27 +195,37 @@ def test_log_format_is_shared_with_both_processes(configured, monkeypatch):
     assert not (store.var / "monitoring").exists()
 
 
-def test_docker_monitoring_network_resolves_only_attached_subnets(configured, monkeypatch):
-    from types import SimpleNamespace
+def test_network_names_resolve_to_current_role_specific_addresses(configured):
+    from network_inputs import unified_addresses
 
     store = configured("docker")
     form = configure(store)
     fields = {item.key: item for item in form.fields}
-    form.edit(fields["extra_networks"], "1panel-network")
-    form.edit(fields["frontend_metrics_enabled"], "1")
-    seen = []
-
-    def inspect(arguments, **_):
-        assert arguments[:3] == ["docker", "network", "inspect"]
-        seen.append(arguments[-1])
-        return SimpleNamespace(stdout="172.21.0.0/16,fd01::/64,\n")
-
-    monkeypatch.setattr("configure.subprocess.run", inspect)
-    form.edit(fields["frontend_direct_peers"], "1panel-network,192.0.2.8")
-    assert fields["frontend_direct_peers"].value == "172.21.0.0/16,fd01::/64,192.0.2.8/32"
-    assert seen == ["1panel-network"]
+    for key, value in (
+        ("extra_networks", "1panel-network"),
+        ("backend_peers", "192.0.2.8,1panel-network"),
+        ("frontend_bind", "1panel-network"),
+        ("frontend_proxies", "1panel-network"),
+        ("console_peers", "1panel-network"),
+        ("frontend_metrics_enabled", "1"),
+        ("frontend_direct_peers", "192.0.2.8,1panel-network"),
+    ):
+        form.edit(fields[key], value)
+    form.save()
+    for prefix in ("172.21", "172.22"):
+        binds, overlays = unified_addresses(
+            store.doc, {"1panel-network": {"Driver": "bridge", "IPAM": {"Config": [
+                {"Subnet": prefix + ".0.0/16", "Gateway": prefix + ".0.1"},
+            ]}}},
+        )
+        assert binds["frontend"] == prefix + ".0.1"
+        assert overlays["backend"]["EVERUNFOLD_INTERNAL_PEER_CIDRS"] == prefix + ".0.0/16"
+        assert overlays["frontend"]["EVERUNFOLD_NODES_TLS_PROXY_IPS"] == prefix + ".0.1"
+        assert overlays["frontend"]["EVERUNFOLD_FRONTEND_NODES_ALLOWED_PEERS"] == prefix + ".0.0/16"
+        assert overlays["frontend"]["EVERUNFOLD_FRONTEND_METRICS_ALLOWED_PEERS"] == "192.0.2.8," + prefix + ".0.0/16"
+        assert "EVERUNFOLD_NODES_TLS_PROXY_IPS" not in overlays["backend"]
     with pytest.raises(ValueError, match="加入主网络"):
-        form.edit(fields["frontend_direct_peers"], "unrelated-network")
+        unified_addresses(store.doc, {})
 
 
 def test_environment_isolation_and_worker_overrides(configured, monkeypatch):

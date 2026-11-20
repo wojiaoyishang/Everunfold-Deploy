@@ -25,7 +25,7 @@ def valid_url(value):
         return False
 
 
-def add_monitoring_fields(add, value, env, *, lookup, combined=False):
+def add_monitoring_fields(add, value, env, *, combined=False):
     add(
         "metrics_enabled",
         "Prometheus 指标",
@@ -43,7 +43,6 @@ def add_monitoring_fields(add, value, env, *, lookup, combined=False):
         "metrics_peers",
         "指标拉取来源 IP/CIDR",
         env.get(METRICS + "ALLOWED_PEERS", LOCAL),
-        lookup=lookup,
         hint="填写后端实际直连来源，多个用逗号分隔。仍须采集令牌。",
         active=enabled,
     )

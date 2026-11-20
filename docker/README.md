@@ -40,15 +40,15 @@
 | 前端宿主映射绑定 IP / 端口 | `127.0.0.1` / `3000` |
 | 主网络 | `everunfold-network` |
 | 额外网络 | `1panel-network` |
-| 宿主反代所在 Docker 网络 | `1panel-network` |
+| 两端 HTTPS 反向代理的直接来源 IP | `1panel-network` |
 | 添加 host.docker.internal | `1` |
 | 后端持久目录 | `/opt/everunfold/Everunfold-Data/backend` |
 | 前端持久目录 | `/opt/everunfold/Everunfold-Data/frontend` |
 
 主自定义网络不存在时会创建；额外网络必须已经存在。
 内置 `bridge` 与 `1panel-network` 也能组合：创建容器后分别 `docker network connect`，不会同时向 `docker run` 传冲突的网络模式。
-选定宿主反代网络后，每次由 setup 启动都会读取其当前网关，加入两端节点控制台的 HTTPS 代理信任 IP。
-容器内运行的反代应填写实际直连代理 IP；不要把所有网络来源都当成 HTTPS 反代。
+在内部通信、监控和前端节点控制台的来源字段中可混填 IP、CIDR 和已连接的网络名，以逗号分隔；网络名展开为子网。前端节点控制台核对实际连接对端。通过反向代理打开控制台时需允许代理的连接来源。
+在 HTTPS 反向代理来源和宿主映射绑定 IP 字段中，网桥名称解析为宿主网关。容器内运行的反代应填写实际直连代理 IP。`./setup.sh --docker start` 自动迁移旧网络配置，并且每次启动重新读取 IPAM。原生模式使用 IP/CIDR。
 
 数据库/Redis 若在同一自定义网络，可填写它们的容器 DNS 名与容器内部端口。
 若服务在宿主机，启用 host.docker.internal 后使用该名称和宿主服务端口；服务仍须监听可被网桥访问的接口。
@@ -76,6 +76,8 @@ APT 主源和安全更新源用于构建运行镜像，npm Registry 用于编译
 保存后运行 `./setup.sh --docker build`，再运行 `./setup.sh --docker start` 应用新产物。
 
 只改 npm Registry 时可直接执行 `./setup.sh --docker rebuild-frontend`，随后执行 `start`。单独编译插件也会使用新的 npm Registry。首次升级此功能时需先完整构建支持镜像源的运行镜像。
+
+前端构建只读使用配置所指向的后端源码目录准备锁定的契约。校验后的契约会缓存在前端数据目录的 `npm-cache/everunfold-contracts/`。本地没有匹配文件时，可以用环境变量 `EVERUNFOLD_CONTRACT_BASE_URL` 指定提供 `<提交>/contracts/<文件>` 的构建镜像地址。npm 安装会单独显示实际使用的 Registry。
 
 ## 重启、更新和迁移
 

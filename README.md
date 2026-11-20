@@ -107,6 +107,14 @@ Docker 模式在本部署的运行容器内执行。原生前台模式可在另�
 
 在目标前端运行 `./setup.sh --connection-file /安全目录/web-remote.json` 导入。省略 `--output` 时，命令向标准输出写入 Base64。两种格式都含该节点的双向令牌、后端发布 URL 和数据库来源 UUID，请通过私密渠道传输。
 
+## 节点连接配置保存位置
+
+统一部署的根 `config.yaml` 或 `CONFIG_FILE` 指定文件保存两端的部署配置。初始双向令牌分属 `backend.environment` 和 `frontend.environment`，外部前端的初始后端配对也保存在 `backend` 分区。启动时生成 `var/runtime/backend/config.yaml` 和 `var/runtime/frontend/config.yaml`。
+
+后端 `/_nodes` 的在线改动保存在 PostgreSQL 的 `frontend_node_registry`。逐节点来源规则和加密后的令牌位于 `bindings`。统一部署再次启动时保留在线连接规则，并把本机节点的在线令牌同步到前端运行配置。向导的“查看双向密钥”显示部署配置值。
+
+独立部署的前端、后端各自使用仓库根 `config.yaml` 或各自的 `CONFIG_FILE`。远程前端的令牌从自己的 setup 或 `/admin/_nodes` 更新。前端允许后端 Worker 访问的 IP/CIDR 仍由该前端配置。
+
 ## 沿用已经配置好的前后端
 
 新部署首次打开时，会读取默认源码目录中已有的 `config.yaml`，保留应用主密钥、数据库连接和节点凭据。

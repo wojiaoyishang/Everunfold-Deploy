@@ -19,16 +19,19 @@ def selected_connection(doc):
     return doc["application"]
 
 
-def validate_connection(doc, node, target, backend_env, epoch):
+def validate_connection(doc, node, target, backend_env, epoch, current_binding=None):
     selected = selected_connection(doc)
     if selected.get("FRONTEND_NODE_ID") != node:
         raise PairingError("前端当前连接不是此部署节点，请先在节点页切回正确连接。")
-    for key, reference in (
-        ("nextjs_to_fastapi_token_env", target.nextjs_to_fastapi_token_env),
-        ("fastapi_to_nextjs_token_env", target.fastapi_to_nextjs_token_env),
+    for direction, field in (
+        ("inbound", "nextjs_to_fastapi_token_env"),
+        ("outbound", "fastapi_to_nextjs_token_env"),
     ):
-        name = selected.get("backend", {}).get(key)
-        if not name or doc["environment"].get(name) != backend_env.get(reference):
+        name = selected.get("backend", {}).get(field)
+        managed = getattr(current_binding, "encrypted_" + direction, None) is not None
+        if not name or (
+            not managed and doc["environment"].get(name) != backend_env.get(getattr(target, field))
+        ):
             raise PairingError("两端节点令牌不一致，请在统一向导中核对配对并保存。")
     old_epoch = (
         selected.get("source_epoch")
@@ -52,6 +55,7 @@ async def pair_locked(frontend_path):
     from app.modules.settings.nodes_schemas import NodeChange
     from app.plugins.nodes_monitor.management import manage_node
     from sqlalchemy import text
+    from tools.import_frontend_nodes import BindingConflict
     from tools.import_frontend_nodes import run as import_nodes
 
     settings = load_settings()
@@ -74,35 +78,20 @@ async def pair_locked(frontend_path):
             record = await registry_record(session)
         doc = read(frontend_path)
         backend_env = {**read(os.environ["CONFIG_FILE"])["environment"], **os.environ}
-        validate_connection(doc, node, target, backend_env, epoch)
+        existing = registry_directory(record) if record is not None else None
+        current_binding = existing.bindings.get(node) if existing else None
+        validate_connection(doc, node, target, backend_env, epoch, current_binding)
         if record is None:
             await import_nodes(False)
-        async with database.session() as session:
-            directory = registry_directory(await registry_record(session))
-            previous = directory.entries.get(node)
-            # Connection changes use the same audited service/locks as /_nodes.
-            prior_binding = directory.bindings.get(node)
-            fields = {
-                "settings_receiver_url",
-                "allow_private_http",
-                "nextjs_to_fastapi_token_env",
-                "fastapi_to_nextjs_token_env",
-            }
-            changed = prior_binding is None or prior_binding.model_dump(
-                include=fields
-            ) != target.model_dump(include=fields)
-            if previous and previous.enabled and changed:
-                await manage_node(
-                    session,
-                    settings,
-                    NodeChange(
-                        action="edit",
-                        node_id=node,
-                        expected_revision=directory.revision,
-                        registration=NodeRegistration(enabled=False),
-                    ),
-                )
-        await import_nodes(True, pairing)
+        # Register deployment defaults a single time. An existing binding with the same
+        # environment references may contain live console changes that should survive setup.
+        try:
+            if existing is not None and node in existing.entries and current_binding is None:
+                await import_nodes(True, pairing, preserve_binding=True, attach_unbound=True)
+            else:
+                await import_nodes(True, pairing, preserve_binding=True)
+        except BindingConflict:
+            raise PairingError("本机节点 ID 已登记为另一组令牌引用，请核对本机配对。") from None
         async with database.session() as session:
             directory = registry_directory(await registry_record(session))
             previous = directory.entries.get(node)
@@ -117,6 +106,17 @@ async def pair_locked(frontend_path):
                         registration=NodeRegistration(enabled=True),
                     ),
                 )
+            current = directory.bindings[node]
+            selected = selected_connection(doc)["backend"]
+            for direction, field in (
+                ("inbound", "nextjs_to_fastapi_token_env"),
+                ("outbound", "fastapi_to_nextjs_token_env"),
+            ):
+                if getattr(current, "encrypted_" + direction, None) is not None:
+                    secret = current.token(settings, node, direction, environment=backend_env)
+                    if not secret:
+                        raise PairingError("无法读取本机节点在线配置的令牌，请核对后端应用主密钥。")
+                    doc["environment"][selected[field]] = secret
         if "connection_profiles" in doc:
             selected_connection(doc)["source_epoch"] = epoch
         else:

@@ -492,7 +492,7 @@ class SetupApp(App[int]):
             return
         node, inbound, outbound = (self.config.get(key) for key in ("node", "inbound", "outbound"))
         text = f"本机前端节点  {node}\n前端 → 后端  {inbound}\n后端 → 前端  {outbound}"
-        self.push_screen(CopyText("本机双向通讯密钥 · 向导当前值", text))
+        self.push_screen(CopyText("本机双向通讯密钥 · 部署配置值", text))
 
     def action_export_pairing(self) -> None:
         if not self.exporting and not self.testing:

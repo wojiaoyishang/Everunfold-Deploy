@@ -58,30 +58,8 @@
 
 1. 在向导中配置「后端宿主映射绑定 IP」和「后端宿主映射端口」。例如绑定 `0.0.0.0:3434`，由宿主的 IPv4 接口转到容器 `8001`；也可只绑定一个指定的宿主 IP。经宿主反代时可保留 `127.0.0.1:3434`，让外部节点走 HTTPS。前端宿主映射独立；任一端绑定 IP 留空会关闭对应的宿主映射。旧配置的 `deployment.bind` 会作为两端各自的初始值。端口修改后选择「启动已构建版本」重新创建容器。
 2. 在「外部前端调用后端的来源 IP/CIDR」中加入后端实际看到的对端地址。外部前端使用可达的宿主 IP 加映射端口，或使用反代的 HTTPS 根地址作为「后端内部连接 URL」。后端若经反代接收请求，应填写直接连接到后端的代理地址；应用不会从转发头取得白名单来源。限制外部端口的防火墙范围，跨机器发送令牌时使用 HTTPS 或受控私网。
-3. 给新前端使用独立节点 ID、内部接收器 URL 和一对随机令牌。将下面的字段**合并到**部署仓库根目录 `config.yaml` 的 `backend` 分区，保留原有配置和自动配对。`environment` 中分别填入两个独立随机值，可各运行一次 `openssl rand -hex 32`；不要把令牌提交到 Git。`settings_receiver_url` 填后端 Worker 能访问的新前端接收器根地址，前端的「后端调用接收器的来源 IP/CIDR」也要允许该 Worker 的直连来源。
-
-   ```yaml
-   backend:
-     application:
-       frontends:
-         web-remote:
-           settings_receiver_url: https://receiver.example.com
-           nextjs_to_fastapi_token_env: EVERUNFOLD_REMOTE_INBOUND
-           fastapi_to_nextjs_token_env: EVERUNFOLD_REMOTE_OUTBOUND
-     environment:
-       EVERUNFOLD_REMOTE_INBOUND: "<第一个独立随机值>"
-       EVERUNFOLD_REMOTE_OUTBOUND: "<第二个独立随机值>"
-   ```
-
-4. 首次升级后端代码时先执行 `./setup.sh --docker deploy`。之后只更新连接配置时，运行 `./setup.sh --docker start` 即可。用当前容器登记并导出新节点的连接（若容器名不是 `everunfold`，将其替换）：
-
-   ```bash
-   docker exec -e CONFIG_FILE=/config/backend/config.yaml \
-     -w /workspace/backend everunfold /opt/backend/venv/bin/python \
-     deploy/node_bundle.py --node web-remote
-   ```
-
-5. 在后端 `/_nodes` 中配置并登记 `web-remote`，核对内部接收器后启用。把输出的 Base64 安全地导入新前端的 setup 或 `/admin/_nodes`，填写可达的后端内部连接 URL。后端收到同步请求后仍会核对来源与令牌，由 Worker 投递快照。后端 `/_nodes` 的「同步来访记录」会显示来源 IP、令牌校验结果、请求状态和失败原因；投递结果在同页的节点同步状态中检查。
+3. 使用向导「导出外部前端配对」，给新前端填写独立节点 ID 和后端 Worker 可达的接收器根地址。配对可复制为 Base64，也可通过命令行导出 JSON。详见 [查看通讯密钥和接入其他前端](../README.md#查看通讯密钥和接入其他前端)。
+4. 选择「启动已构建版本」后，在后端 `/_nodes` 登记并启用该节点。前端的「后端调用接收器的来源 IP/CIDR」应允许 Worker 的直连来源。后端收到同步请求后会核对来源与令牌；同步来访和投递结果可在 `/_nodes` 查看。
 
 ## 重启、更新和迁移
 

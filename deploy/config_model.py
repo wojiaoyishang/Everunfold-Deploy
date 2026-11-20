@@ -42,7 +42,7 @@ class Configuration:
         check: Callable[[], list[str]] = lambda: [],
         changed: Callable[[str], None] = lambda _: None,
         probe: Callable[[], Awaitable[list[Check]]] | None = None,
-        export_node: Callable[[], Awaitable[str]] | None = None,
+        export_node: Callable[[str, str, bool], Awaitable[str]] | None = None,
         native: bool = False,
         backend: bool = False,
         location: str = "",

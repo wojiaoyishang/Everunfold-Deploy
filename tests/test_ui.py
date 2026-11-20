@@ -1,6 +1,7 @@
 import asyncio
 
-from config_ui import ACTIONS, Editor, SetupApp
+from config_copy import CopyText
+from config_ui import ACTIONS, Editor, PairingForm, SetupApp
 from configure import configure
 from storage import read
 from textual.widgets import DataTable, Input, OptionList
@@ -100,3 +101,40 @@ def test_docker_quick_actions_fit_and_restart_leaves_draft_unsaved(configured):
     asyncio.run(run())
     assert store.path.read_bytes() == saved
     assert config.get("database") == database
+
+
+def test_pairing_view_and_export_stay_out_of_results_log(configured):
+    config = configure(configured("docker"))
+    exported = []
+
+    async def export(node, receiver, allow_private_http):
+        exported.append((node, receiver, allow_private_http))
+        return "encoded-pairing-result"
+
+    config.export_node = export
+
+    async def run():
+        app = SetupApp(config)
+        async with app.run_test(size=(86, 28)) as pilot:
+            assert await pilot.click("#pairing_keys")
+            assert isinstance(app.screen, CopyText)
+            assert all(
+                config.get(key) in app.screen.text for key in ("node", "inbound", "outbound")
+            )
+            await pilot.press("escape")
+            assert await pilot.click("#export_pairing")
+            await pilot.pause()
+            assert isinstance(app.screen, PairingForm)
+            app.screen.query_one("#pairing-node", Input).value = "web-remote"
+            app.screen.query_one("#pairing-receiver", Input).value = "https://web.example.test"
+            assert await pilot.click("#export")
+            await pilot.pause()
+            assert exported == [("web-remote", "https://web.example.test", False)]
+            assert isinstance(app.screen, CopyText)
+            assert app.screen.encoded == "encoded-pairing-result"
+            await pilot.press("escape")
+            log = "\n".join(app.query_one("#checks").transcript)
+            assert all(config.get(key) not in log for key in ("inbound", "outbound"))
+            assert "encoded-pairing-result" not in log
+
+    asyncio.run(run())

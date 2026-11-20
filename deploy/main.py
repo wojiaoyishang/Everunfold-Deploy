@@ -129,12 +129,38 @@ def main():
             "sync",
             "init-db",
             "migrate",
+            "export-node",
         ),
     )
     parser.add_argument("--backend-source", type=Path, help="import 时的后端源码目录")
     parser.add_argument("--frontend-source", type=Path, help="import 时的前端源码目录")
+    parser.add_argument("--node", help="export-node 要导出的外部前端节点 ID")
+    parser.add_argument("--receiver", help="首次导出时填写前端内部接收器根地址")
+    parser.add_argument("--allow-private-http", action="store_true", help="允许使用可信私网 HTTP")
+    parser.add_argument("--output", type=Path, help="将配对导出到新的私有 JSON 文件")
     args = parser.parse_args()
     mode = "docker" if args.docker else "native" if args.native else None
+    if args.action != "export-node" and (
+        args.node or args.receiver or args.allow_private_http or args.output
+    ):
+        parser.error("配对参数仅用于 export-node。")
+    if args.action == "export-node":
+        from node_pairing import export_node, write_bundle
+
+        if not args.node or args.backend_source or args.frontend_source:
+            parser.error("export-node 需要 --node，使用已保存的部署配置。")
+        if args.output and args.output.expanduser().exists():
+            raise ValueError("导出文件已存在，请另选路径。")
+        store = Store()
+        if mode and store.original and mode != store.doc["deployment"].get("mode"):
+            raise ValueError("指定的部署方式与已保存的实例不一致。")
+        encoded = export_node(store.path, args.node, args.receiver or "", args.allow_private_http)
+        if args.output:
+            write_bundle(args.output, encoded, args.node.strip())
+            print(f"已导出配对到 {args.output}。")
+        else:
+            print(encoded)
+        return
     store = Store()
     defaults(store, mode)
     if args.action == "import":

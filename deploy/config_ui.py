@@ -16,6 +16,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -244,6 +245,41 @@ class Editor(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class PairingForm(ModalScreen[tuple[str, str, bool] | None]):
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="dialog"):
+            yield Label("导出外部前端配对", classes="dialog-title")
+            yield Label("独立前端节点 ID")
+            yield Input(placeholder="web-remote", id="pairing-node")
+            yield Label("前端内部接收器根地址（重新导出时可留空）")
+            yield Input(placeholder="https://receiver.example.com", id="pairing-receiver")
+            yield Checkbox("允许通过可信私网使用 HTTP", id="pairing-private-http")
+            yield Static(
+                "首次导出后，请启动已构建版本，再在后端 /_nodes 登记并启用节点。",
+                classes="muted",
+                markup=False,
+            )
+            with Horizontal(classes="buttons"):
+                yield Button("导出 Base64", variant="primary", id="export")
+                yield Button("返回", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "cancel":
+            self.dismiss(None)
+            return
+        self.dismiss(
+            (
+                self.query_one("#pairing-node", Input).value,
+                self.query_one("#pairing-receiver", Input).value,
+                self.query_one("#pairing-private-http", Checkbox).value,
+            )
+        )
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 class SetupApp(App[int]):
     TITLE = "Everunfold · 部署助手"
     ENABLE_COMMAND_PALETTE = False
@@ -318,11 +354,16 @@ class SetupApp(App[int]):
                 yield Button("仅保存", id="save")
                 yield Button("保存并构建", id="build", variant="success")
                 yield Button("构建并启动", id="deploy", variant="success")
-            if not self.config.native:
-                with Horizontal(classes="buttons"):
+            with Horizontal(classes="buttons"):
+                if not self.config.native:
                     yield Button("重新编译前端", id="rebuild-frontend")
-                    yield Button("启动已构建版本", id="start", variant="success")
+                yield Button("启动已构建版本", id="start", variant="success")
+                if not self.config.native:
                     yield Button("重启容器", id="restart")
+            if self.config.export_node:
+                with Horizontal(classes="buttons"):
+                    yield Button("查看双向密钥", id="pairing_keys")
+                    yield Button("导出外部前端配对", id="export_pairing")
             with Horizontal(classes="buttons"):
                 yield Button("编译前端插件", id="build-plugins")
                 yield Button("热更新前端", id="hot-update-frontend", variant="success")
@@ -445,6 +486,44 @@ class SetupApp(App[int]):
         item = self.config.fields[self.query_one(DataTable).cursor_row]
         if item.active():
             self.push_screen(CopyText(item.label, item.value))
+
+    def action_pairing_keys(self) -> None:
+        if self.exporting:
+            return
+        node, inbound, outbound = (self.config.get(key) for key in ("node", "inbound", "outbound"))
+        text = f"本机前端节点  {node}\n前端 → 后端  {inbound}\n后端 → 前端  {outbound}"
+        self.push_screen(CopyText("本机双向通讯密钥 · 向导当前值", text))
+
+    def action_export_pairing(self) -> None:
+        if not self.exporting and not self.testing:
+            self.export_pairing()
+
+    @work(group="pairing")
+    async def export_pairing(self) -> None:
+        export = self.config.export_node
+        if not export or self.exporting or len(self.screen_stack) > 1:
+            return
+        self.exporting = True
+        try:
+            values = await self.push_screen_wait(PairingForm())
+            if values is None:
+                return
+            self.notify("正在从后端导出配对。")
+            encoded = await export(*values)
+            self.push_screen(
+                CopyText(
+                    "外部前端配对 · 在目标前端运行 ./setup.sh --connection-base64",
+                    encoded,
+                    "./setup.sh --connection-base64",
+                    encoded,
+                )
+            )
+        except ValueError as error:
+            self.notify(str(error), title="导出未完成", severity="error")
+        except OSError:
+            self.notify("无法读取部署配置或执行后端导出。", title="导出未完成", severity="error")
+        finally:
+            self.exporting = False
 
     def action_copy_results(self) -> None:
         log = self.query_one(ResultsLog)

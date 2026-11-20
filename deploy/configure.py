@@ -1,5 +1,6 @@
 """Combined frontend/backend form using the existing Everunfold terminal UI."""
 
+import asyncio
 import copy
 import hashlib
 import ipaddress
@@ -416,7 +417,7 @@ def configure(store, mode=None):
             generate=generated,
             resolve=lambda s: s or generated(),
             group="自动配对",
-            hint="统一写入两端，无需导出或导入 Base64。已有部署沿用原值。",
+            hint="统一写入本机两端。给其他前端配对时，请使用独立节点导出。已有部署沿用原值。",
         )
     internal_auth = ba.setdefault("internal_auth", {})
     add(
@@ -609,6 +610,11 @@ def configure(store, mode=None):
                 issues.append("请选择网桥网络，不支持 host / none。")
         if value("inbound") == value("outbound"):
             issues.append("双向令牌不能相同。")
+        if any(
+            value("node").casefold() == node.casefold()
+            for node in meta.get("external_pairings", {})
+        ):
+            issues.append("本机前端节点 ID 已用于外部配对，请选择不同的 ID。")
         return (
             issues
             + capacity_errors(value)
@@ -668,12 +674,18 @@ def configure(store, mode=None):
         apply()
         return await probe_document(store)
 
+    async def export(node, receiver, allow_private_http):
+        from node_pairing import export_node
+
+        return await asyncio.to_thread(export_node, store.path, node, receiver, allow_private_http)
+
     return Configuration(
         "Everunfold · 前后端统一部署",
         fields,
         save=save,
         check=errors,
         probe=probe,
+        export_node=export,
         native=native,
         backend=True,
         location=str(store.path),

@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
+from config_mirrors import add_mirror_fields
 from config_model import Configuration, Field
 from config_validation import (
     db_url,
@@ -157,6 +158,9 @@ def configure(store, mode=None):
 
     def docker_active():
         return value("mode") == "docker"
+
+    mirror_mapping = add_mirror_fields(add, value, d, "deploy", docker_active)
+    setters.append(lambda: d.update(mirror_mapping()))
 
     def docker_subnets(name):
         if not docker_active():

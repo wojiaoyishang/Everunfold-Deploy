@@ -12,6 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from config_mirrors import BOOTSTRAP_KEYS, NPM, resolve_sources
 from config_model import Check
 from storage import ROOT, lock, read, write
 from worker_capacity import PROCESS_KEYS, capacity_arguments
@@ -193,6 +194,16 @@ def save_build(store, directory, manifest):
     return manifest
 
 
+def mirror_build_args(settings, *, bootstrap=False):
+    sources = resolve_sources(settings, "deploy")
+    return [
+        arg
+        for key, value in sources.items()
+        if value and (key in BOOTSTRAP_KEYS if bootstrap else key != NPM)
+        for arg in ("--build-arg", f"{key}={value}")
+    ]
+
+
 def build_image(store, directory, revisions):
     context = store.var / "build" / directory.name / "image"
     (context / "backend").mkdir(parents=True)
@@ -202,12 +213,16 @@ def build_image(store, directory, revisions):
         ROOT / "deploy", context / "deploy", ignore=shutil.ignore_patterns("__pycache__")
     )
     shutil.copy2(ROOT / "docker/frontend-build.sh", context / "frontend-entrypoint.sh")
+    (context / "docker").mkdir()
+    for name in ("uv-sync.sh", "apt-mirrors.sh", "npm-ci.sh"):
+        shutil.copy2(ROOT / "docker" / name, context / "docker" / name)
     image = "everunfold:" + directory.name.lower()
     execute(
         [
             "docker",
             "build",
             "--progress=plain",
+            *mirror_build_args(store.doc["deployment"]),
             "--build-arg",
             "BACKEND_REVISION=" + revisions["backend"],
             "--build-arg",
@@ -233,6 +248,7 @@ def compile_frontend(store, directory, image=None, *, plugins_only=False):
         (("build-plugins",),) if plugins_only else (("build", "frontend"), ("build-plugins",))
     )
     if image:
+        registry = resolve_sources(d, "deploy")[NPM]
         builder = [
             "--user",
             d["uid"] + ":" + d["gid"],
@@ -247,11 +263,27 @@ def compile_frontend(store, directory, image=None, *, plugins_only=False):
             *mount(cache, "/build/npm-cache"),
             *mount(plugins, "/plugins"),
         ]
+        if registry:
+            support = execute(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    '{{index .Config.Labels "org.everunfold.build.npm-mirror"}}',
+                    image,
+                ],
+                capture=True,
+            )
+            if support != "1":
+                raise ValueError("当前镜像未支持 npm 镜像源，请先完整构建一次。")
+            builder += ["-e", f"{NPM}={registry}"]
         for args in commands:
             temporary(d, [*builder, image, *args])
     else:
         env = {
             **build_environment(),
+            NPM: "",
             "SOURCE_ROOT": d["frontend_source"],
             "BUILD_ROOT": str(
                 directory / "work"
@@ -825,8 +857,12 @@ def docker_probe(path):
     d = doc["deployment"]
     ensure_docker()
     ensure_networks(d)
+    mirror_args = mirror_build_args(d, bootstrap=True)
     fingerprint = hashlib.sha256(
         (ROOT / "uv.lock").read_bytes()
+        + (ROOT / "pyproject.toml").read_bytes()
+        + (ROOT / "docker/uv-sync.sh").read_bytes()
+        + json.dumps(mirror_args).encode()
         + (ROOT / "docker/setup.Dockerfile").read_bytes()
         + (ROOT / "deploy/probe.py").read_bytes()
     ).hexdigest()[:12]
@@ -838,6 +874,7 @@ def docker_probe(path):
                 "docker",
                 "build",
                 "--progress=plain",
+                *mirror_args,
                 "-t",
                 image,
                 "-f",

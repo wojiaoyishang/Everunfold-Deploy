@@ -59,6 +59,8 @@ cd Everunfold-Deploy
 详细的端口、挂载、1Panel 网络和升级步骤见 [Docker 教程](docker/README.md)。
 其他服务器上的前端也能连接此后端，详见[接入外部前端](docker/README.md#接入外部前端)。
 
+Docker 构建可配置 [容器软件源](docker/README.md#容器软件源)，包括 APT、PyPI、npm 和基础镜像引用。
+
 ## 二、不用 Docker
 
 Linux 主机安装 Git、curl、rsync、Node.js **22.15.1 或更新的 22.x**、npm **10.9.2 或更新的 10.x**。

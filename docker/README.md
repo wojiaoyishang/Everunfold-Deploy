@@ -61,6 +61,20 @@
 3. 使用向导「导出外部前端配对」，给新前端填写独立节点 ID 和后端 Worker 可达的接收器根地址。配对可复制为 Base64，也可通过命令行导出 JSON。详见 [查看通讯密钥和接入其他前端](../README.md#查看通讯密钥和接入其他前端)。
 4. 选择「启动已构建版本」后，在后端 `/_nodes` 登记并启用该节点。前端的「后端调用接收器的来源 IP/CIDR」应允许 Worker 的直连来源。后端收到同步请求后会核对来源与令牌；同步来访和投递结果可在 `/_nodes` 查看。
 
+## 容器软件源
+
+在 Docker 向导的「容器软件源 → 镜像源方案」选择官方源（默认）、清华 TUNA、中科大 USTC 或自定义。
+
+APT 主源和安全更新源用于构建运行镜像，npm Registry 用于编译前端主体和插件。PyPI 索引用于构建后端和连接检测镜像。
+
+清华和中科大方案使用各自的 Debian、Debian Security 和 PyPI 镜像，npm 使用 npmmirror。自定义方案可按项填入 HTTP/HTTPS 源地址。PyPI 地址须指向 Simple API，留空使用该工具的官方源。安装继续按仓库锁文件校验版本与哈希。
+
+可单独填写 Node.js、Python 和 uv 基础镜像引用，例如 `registry.example.com/mirror/python:3.12-slim-bookworm`。使用私有仓库时先用 Docker 登录，并选择与默认镜像同版本、同发行版的副本。
+
+保存后运行 `./setup.sh --docker build`，再运行 `./setup.sh --docker start` 应用新产物。
+
+只改 npm Registry 时可直接执行 `./setup.sh --docker rebuild-frontend`，随后执行 `start`。单独编译插件也会使用新的 npm Registry。首次升级此功能时需先完整构建支持镜像源的运行镜像。
+
 ## 重启、更新和迁移
 
 | 向导操作 | 命令 | 适用情况 |

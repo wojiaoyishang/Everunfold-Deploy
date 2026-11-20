@@ -3,6 +3,7 @@ set -euo pipefail
 
 printf 'Everunfold Frontend | runtime image %s | mode %s\n' "${EVERUNFOLD_IMAGE_REVISION:-unknown}" "${1:-deploy}"
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source_root=${SOURCE_ROOT:-/workspace}
 build_root=${BUILD_ROOT:-/build/work}
 output=${OUTPUT_ROOT:-/output}
@@ -34,7 +35,7 @@ prepare_source() {
   cd "$build_root"
 
   build_log "Installing locked npm dependencies; download cache: $npm_config_cache."
-  npm ci --ignore-scripts --include=dev --no-audit --prefer-offline --loglevel=verbose --timing
+  bash "$script_dir/npm-ci.sh"
 }
 
 build() {

@@ -5,3 +5,4 @@
 !deploy/*.py
 !docker/
 !docker/setup.Dockerfile
+!docker/uv-sync.sh
